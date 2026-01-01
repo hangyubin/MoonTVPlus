@@ -5298,11 +5298,11 @@ function PlayPageClient() {
       <div className='relative z-10 flex flex-col gap-3 py-4 px-5 lg:px-[3rem] 2xl:px-20'>
         {/* 第一行：影片标题 */}
         <div className='py-1'>
-          <h1 className='text-xl font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2 flex-wrap'>
+          <h1 className={`text-xl font-semibold flex items-center gap-2 flex-wrap ${tmdbBackdrop ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
             <span>
               {videoTitle || '影片标题'}
               {totalEpisodes > 1 && (
-                <span className='text-gray-500 dark:text-gray-400'>
+                <span className={tmdbBackdrop ? 'text-white opacity-80' : 'text-gray-500 dark:text-gray-400'}>
                   {` > ${
                     detail?.episodes_titles?.[currentEpisodeIndex] ||
                     `第 ${currentEpisodeIndex + 1} 集`
@@ -5778,7 +5778,7 @@ function PlayPageClient() {
           <div className='md:col-span-3'>
             <div className='p-6 flex flex-col min-h-0'>
               {/* 标题 */}
-              <h1 className='text-3xl font-bold mb-2 tracking-wide flex items-center flex-shrink-0 text-center md:text-left w-full flex-wrap gap-2'>
+              <h1 className={`text-3xl font-bold mb-2 tracking-wide flex items-center flex-shrink-0 text-center md:text-left w-full flex-wrap gap-2 ${tmdbBackdrop ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
                 <span className={doubanAka.length > 0 ? 'relative group cursor-help' : ''}>
                   {videoTitle || '影片标题'}
                   {/* aka 悬浮提示 */}
@@ -5896,7 +5896,7 @@ function PlayPageClient() {
               </h1>
 
               {/* 关键信息行 */}
-              <div className='flex flex-wrap items-center gap-3 text-base mb-4 opacity-80 flex-shrink-0'>
+              <div className={`flex flex-wrap items-center gap-3 text-base mb-4 opacity-80 flex-shrink-0 ${tmdbBackdrop ? 'text-white' : ''}`}>
                 {detail?.class && (
                   <span className='text-green-600 font-semibold'>
                     {detail.class}
@@ -5916,7 +5916,7 @@ function PlayPageClient() {
               {/* 剧情简介 */}
               {(doubanCardSubtitle || detail?.desc) && (
                 <div
-                  className='mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-hide'
+                  className={`mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-hide ${tmdbBackdrop ? 'text-white' : ''}`}
                   style={{ whiteSpace: 'pre-line' }}
                 >
                   {/* card_subtitle 在前，desc 在后 */}
