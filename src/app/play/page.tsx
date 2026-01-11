@@ -6941,7 +6941,9 @@ function PlayPageClient() {
                   <span>{doubanYear || detail?.year || videoYear}</span>
                 )}
                 {detail?.source_name && (
-                  <span className='border border-gray-500/60 px-2 py-[1px] rounded'>
+                  <span className={`border px-2 py-[1px] rounded ${
+                    detail.source === 'xiaoya' ? 'border-blue-500' : detail.source === 'openlist' || detail.source === 'emby' || detail.source?.startsWith('emby_') ? 'border-yellow-500' : 'border-gray-500/60'
+                  }`}>
                     {detail.source_name}
                   </span>
                 )}

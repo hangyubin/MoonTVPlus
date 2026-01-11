@@ -863,7 +863,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                           {/* 源名称和集数信息 - 垂直居中 */}
                           <div className='flex items-center justify-between'>
                             <span className={`text-xs px-2 py-1 border rounded text-gray-700 dark:text-gray-300 ${
-                              source.source === 'openlist' || source.source === 'emby' || source.source?.startsWith('emby_')
+                              source.source === 'xiaoya' ? 'border-blue-500' : source.source === 'openlist' || source.source === 'emby' || source.source?.startsWith('emby_')
                            ? 'border-yellow-500'
                                 : 'border-gray-500/60'
                       }`}>
