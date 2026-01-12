@@ -6,6 +6,7 @@ import { getConfig } from '@/lib/config';
 import { getThemeCSS } from '@/styles/themes';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic'; // 禁用缓存
 
 export async function GET(request: NextRequest) {
   try {
