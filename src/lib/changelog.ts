@@ -11,6 +11,20 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
 	{
+    version: '210.1.0',
+    date: '2026-01-27',
+	added: [
+		"增加直链播放",
+		"直播兼容txt格式",
+    ],
+    changed: [
+		"首页轮播图和继续观看可隐藏",
+		"刷新token改为前端进行防止redis数据库方式报错"
+    ],
+    fixed: [
+	]
+	},
+	{
     version: '210.0.0',
     date: '2026-01-25',
 	added: [
