@@ -1275,6 +1275,16 @@ export abstract class BaseRedisStorage implements IStorage {
     );
   }
 
+  async updateLastMovieRequestTime(userName: string, timestamp: number): Promise<void> {
+    await this.withRetry(() =>
+      this.adapter.hSet(
+        this.userInfoKey(userName),
+        'last_movie_request_time',
+        timestamp.toString()
+      )
+    );
+  }
+
   // ---------- 求片相关 ----------
   private movieRequestsKey() {
     return 'movie_requests:all';

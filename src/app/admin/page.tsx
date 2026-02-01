@@ -11290,8 +11290,12 @@ function AdminPageClient() {
       setRole(data.Role);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '获取配置失败';
-      showError(msg, showAlert);
-      setError(msg);
+      // 只在首次加载时设置错误状态，避免弹窗和错误页面同时显示
+      if (showLoading) {
+        setError(msg);
+      } else {
+        showError(msg, showAlert);
+      }
     } finally {
       if (showLoading) {
         setLoading(false);
@@ -11424,8 +11428,42 @@ function AdminPageClient() {
   }
 
   if (error) {
-    // 错误已通过弹窗展示，此处直接返回空
-    return null;
+    // 显示无权限提示页面
+    return (
+      <PageLayout activePath='/admin'>
+        <div className='min-h-screen flex items-center justify-center px-4'>
+          <div className='max-w-md w-full'>
+            <div className='bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 text-center'>
+              <div className='mb-6'>
+                <div className='mx-auto w-16 h-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center'>
+                  <AlertCircle className='w-8 h-8 text-red-600 dark:text-red-400' />
+                </div>
+              </div>
+              <h2 className='text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4'>
+                无权限访问
+              </h2>
+              <p className='text-gray-600 dark:text-gray-400 mb-6'>
+                {error}
+              </p>
+              <div className='space-y-3'>
+                <button
+                  onClick={() => window.location.href = '/'}
+                  className='w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-lg font-medium transition-colors'
+                >
+                  返回首页
+                </button>
+                <button
+                  onClick={() => window.location.href = '/login'}
+                  className='w-full px-6 py-3 bg-gray-600 hover:bg-gray-700 dark:bg-gray-600 dark:hover:bg-gray-700 text-white rounded-lg font-medium transition-colors'
+                >
+                  重新登录
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </PageLayout>
+    );
   }
 
   return (

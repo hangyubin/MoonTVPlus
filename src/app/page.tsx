@@ -575,7 +575,7 @@ function HomeClient() {
       {/* TMDB 热门轮播图 */}
       {homeBannerEnabled && (
         <div className='w-full mb-4'>
-          <BannerCarousel />
+          <BannerCarousel delayLoad={true} />
         </div>
       )}
 

@@ -104,6 +104,7 @@ export async function POST(req: NextRequest) {
     // 导入用户数据和user:info
     const userData = importData.data.userData;
     const storage = (db as any).storage;
+    // 使用前面已声明的 storageType 变量
     const usersV2Map = new Map((importData.data.usersV2 || []).map((u: any) => [u.username, u]));
 
     const userCount = Object.keys(userData).length;
@@ -127,44 +128,69 @@ export async function POST(req: NextRequest) {
 
         const createdAt = userV2?.created_at || Date.now();
 
-        // 直接设置用户信息（不经过createUserV2，避免密码被再次hash）
-        const userInfoKey = `user:${username}:info`;
-        const userInfo: Record<string, string> = {
-          role,
-          banned: String(userV2?.banned || false),
-          password: user.passwordV2, // 已经是hash过的密码，直接使用
-          created_at: createdAt.toString(),
-        };
+        // 根据存储类型使用不同的导入方法
+        if (storageType === 'd1') {
+          // D1 存储：使用 createUserWithHashedPassword 方法
+          try {
+            if (typeof storage.createUserWithHashedPassword === 'function') {
+              await storage.createUserWithHashedPassword(
+                username,
+                user.passwordV2, // 已经是hash过的密码
+                role,
+                createdAt,
+                userV2?.tags,
+                userV2?.oidcSub,
+                userV2?.enabledApis,
+                userV2?.banned
+              );
+              importedCount++;
+              console.log(`用户 ${username} 导入成功 (D1)`);
+            } else {
+              console.error(`D1 storage 缺少 createUserWithHashedPassword 方法`);
+            }
+          } catch (err) {
+            console.error(`导入用户 ${username} 失败:`, err);
+          }
+        } else {
+          // Redis 存储：直接设置用户信息
+          const userInfoKey = `user:${username}:info`;
+          const userInfo: Record<string, string> = {
+            role,
+            banned: String(userV2?.banned || false),
+            password: user.passwordV2, // 已经是hash过的密码，直接使用
+            created_at: createdAt.toString(),
+          };
 
-        if (userV2?.tags && userV2.tags.length > 0) {
-          userInfo.tags = JSON.stringify(userV2.tags);
+          if (userV2?.tags && userV2.tags.length > 0) {
+            userInfo.tags = JSON.stringify(userV2.tags);
+          }
+
+          if (userV2?.oidcSub) {
+            userInfo.oidcSub = userV2.oidcSub;
+          }
+
+          if (userV2?.enabledApis && userV2.enabledApis.length > 0) {
+            userInfo.enabledApis = JSON.stringify(userV2.enabledApis);
+          }
+
+          // 使用storage.withRetry直接设置用户信息
+          await storage.withRetry(() => storage.client.hSet(userInfoKey, userInfo));
+
+          // 添加到用户列表
+          await storage.withRetry(() => storage.client.zAdd('user:list', {
+            score: createdAt,
+            value: username,
+          }));
+
+          // 如果有oidcSub，创建映射
+          if (userV2?.oidcSub) {
+            const oidcSubKey = `oidc:sub:${userV2.oidcSub}`;
+            await storage.withRetry(() => storage.client.set(oidcSubKey, username));
+          }
+
+          importedCount++;
+          console.log(`用户 ${username} 导入成功 (Redis)`);
         }
-
-        if (userV2?.oidcSub) {
-          userInfo.oidcSub = userV2.oidcSub;
-        }
-
-        if (userV2?.enabledApis && userV2.enabledApis.length > 0) {
-          userInfo.enabledApis = JSON.stringify(userV2.enabledApis);
-        }
-
-        // 使用storage.withRetry直接设置用户信息
-        await storage.withRetry(() => storage.client.hSet(userInfoKey, userInfo));
-
-        // 添加到用户列表
-        await storage.withRetry(() => storage.client.zAdd('user:list', {
-          score: createdAt,
-          value: username,
-        }));
-
-        // 如果有oidcSub，创建映射
-        if (userV2?.oidcSub) {
-          const oidcSubKey = `oidc:sub:${userV2.oidcSub}`;
-          await storage.withRetry(() => storage.client.set(oidcSubKey, username));
-        }
-
-        importedCount++;
-        console.log(`用户 ${username} 导入成功`);
       } else {
         console.log(`跳过用户 ${username}：没有passwordV2`);
       }

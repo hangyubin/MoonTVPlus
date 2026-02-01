@@ -174,13 +174,9 @@ export async function POST(request: NextRequest) {
     await storage.createMovieRequest(newRequest);
     await storage.addUserMovieRequest(authInfo.username, newRequest.id);
 
-    // 更新频率限制 - 保存到用户信息的 hash 中
-    if ('client' in storage && storage.client && typeof (storage.client as any).hSet === 'function') {
-      await (storage.client as any).hSet(
-        `user:${authInfo.username}:info`,
-        'last_movie_request_time',
-        Date.now().toString()
-      );
+    // 更新频率限制 - 使用抽象方法兼容所有存储类型
+    if (storage.updateLastMovieRequestTime) {
+      await storage.updateLastMovieRequestTime(authInfo.username, Date.now());
 
       // 清除用户信息缓存，确保下次读取到最新数据
       const { userInfoCache } = await import('@/lib/user-cache');

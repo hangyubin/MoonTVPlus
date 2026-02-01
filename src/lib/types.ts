@@ -118,6 +118,9 @@ export interface IStorage {
   getLastFavoriteCheckTime(userName: string): Promise<number>;
   setLastFavoriteCheckTime(userName: string, timestamp: number): Promise<void>;
 
+  // 求片冷却时间
+  updateLastMovieRequestTime?(userName: string, timestamp: number): Promise<void>;
+
   // 求片相关
   getAllMovieRequests(): Promise<MovieRequest[]>;
   getMovieRequest(requestId: string): Promise<MovieRequest | null>;

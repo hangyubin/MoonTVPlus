@@ -58,3 +58,8 @@ public/workbox-*.js.map
 
 /.claude
 /.vscode
+# SQLite 开发数据库
+.data/
+*.db
+*.db-shm
+*.db-wal

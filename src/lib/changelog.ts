@@ -11,6 +11,23 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
 	{
+    version: '211.0.0',
+    date: '2026-02-01',
+	added: [
+		"cloudflare部署增加d1支持",
+		"电视直播支持flv播放",
+		"登录注册页面输入框增加图标"
+    ],
+    changed: [
+		"豆瓣预告片改为前端获取",
+		"豆瓣预告片可播放声音",
+		"轮播图缓存采用乐观更新策略",
+		"管理面板无权限时显示错误提示"
+    ],
+    fixed: [
+	]
+	},
+	{
     version: '210.2.0',
     date: '2026-01-29',
 	added: [

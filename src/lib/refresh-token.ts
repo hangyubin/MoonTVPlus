@@ -1,5 +1,10 @@
 /* eslint-disable no-console */
 
+import { TOKEN_CONFIG } from './token-config';
+
+// Re-export TOKEN_CONFIG for backward compatibility
+export { TOKEN_CONFIG };
+
 // Lazy import to avoid Edge Runtime issues in middleware
 let getStorage: (() => any) | null = null;
 
@@ -10,13 +15,6 @@ async function loadStorage() {
   }
   return getStorage();
 }
-
-// Token 配置
-export const TOKEN_CONFIG = {
-  ACCESS_TOKEN_AGE: 4 * 60 * 60 * 1000,           // 4 小时
-  REFRESH_TOKEN_AGE: 60 * 24 * 60 * 60 * 1000,    // 60 天
-  RENEWAL_THRESHOLD: 10 * 60 * 1000,              // 剩余 10 分钟时自动续期
-};
 
 interface TokenData {
   token: string;

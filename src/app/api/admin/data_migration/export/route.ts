@@ -152,7 +152,18 @@ async function getUserPasswordV2(username: string): Promise<string | null> {
     const storage = (db as any).storage;
     if (!storage) return null;
 
-    // 直接调用hGetAll获取完整用户信息（包括密码）
+    // 检查存储类型
+    const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
+
+    // D1 存储：使用 getUserPasswordHash 方法
+    if (storageType === 'd1') {
+      if (typeof storage.getUserPasswordHash === 'function') {
+        return await storage.getUserPasswordHash(username);
+      }
+      return null;
+    }
+
+    // Redis 存储：直接调用hGetAll获取完整用户信息（包括密码）
     const userInfoKey = `user:${username}:info`;
 
     if (typeof storage.withRetry === 'function' && storage.client?.hgetall) {

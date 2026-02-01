@@ -2,7 +2,7 @@
 
 'use client';
 
-import { AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, CheckCircle, Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
@@ -256,7 +256,7 @@ function LoginPageClient() {
       <div className='absolute top-4 right-4'>
         <ThemeToggle />
       </div>
-      <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800'>
+      <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 shadow-2xl p-10 dark:border dark:border-zinc-800'>
         <h1 className='text-green-600 tracking-tight text-center text-3xl font-extrabold mb-8 bg-clip-text drop-shadow-sm'>
           {siteName}
         </h1>
@@ -266,15 +266,20 @@ function LoginPageClient() {
               <label htmlFor='username' className='sr-only'>
                 用户名
               </label>
-              <input
-                id='username'
-                type='text'
-                autoComplete='username'
-                className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-                placeholder='输入用户名'
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
+              <div className='relative'>
+                <div className='absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none'>
+                  <User className='h-5 w-5 text-gray-400 dark:text-gray-500' />
+                </div>
+                <input
+                  id='username'
+                  type='text'
+                  autoComplete='username'
+                  className='block w-full rounded-lg border-0 py-3 pl-10 pr-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60'
+                  placeholder='输入用户名'
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
             </div>
           )}
 
@@ -283,11 +288,14 @@ function LoginPageClient() {
               密码
             </label>
             <div className='relative'>
+              <div className='absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none'>
+                <Lock className='h-5 w-5 text-gray-400 dark:text-gray-500' />
+              </div>
               <input
                 id='password'
                 type={showPassword ? 'text' : 'password'}
                 autoComplete='current-password'
-                className='block w-full rounded-lg border-0 py-3 px-4 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
+                className='block w-full rounded-lg border-0 py-3 pl-10 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60'
                 placeholder='输入访问密码'
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -374,7 +382,7 @@ function LoginPageClient() {
             <button
               type='button'
               onClick={() => window.location.href = '/api/auth/oidc/login'}
-              className='mt-4 w-full inline-flex justify-center items-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white/60 dark:bg-zinc-800/60 backdrop-blur py-3 text-base font-semibold text-gray-700 dark:text-gray-200 shadow-sm transition-all duration-200 hover:bg-gray-50 dark:hover:bg-zinc-700/60'
+              className='mt-4 w-full inline-flex justify-center items-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white/60 dark:bg-zinc-800/60 py-3 text-base font-semibold text-gray-700 dark:text-gray-200 shadow-sm transition-all duration-200 hover:bg-gray-50 dark:hover:bg-zinc-700/60'
             >
               <svg className='w-5 h-5 mr-2' fill='currentColor' viewBox='0 0 20 20'>
                 <path fillRule='evenodd' d='M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z' clipRule='evenodd' />

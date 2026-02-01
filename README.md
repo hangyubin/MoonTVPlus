@@ -170,7 +170,18 @@ on:
 - 点击 Settings > Triggers > Custom Domains
 - 添加你的自定义域名
 
-**6.配置外部定时任务（可选）**
+**6. 使用 D1 数据库（可选）**
+
+如果想使用 Cloudflare D1 数据库代替 Upstash Redis，需要进行以下配置：
+
+1. 在 Cloudflare Dashboard 中创建一个 D1 数据库
+2. 复制数据库 ID
+3. 在 GitHub Secrets 中配置：
+   - 将 `NEXT_PUBLIC_STORAGE_TYPE` 设置为 `d1`
+   - 添加 `D1_DATABASE_ID` 并填入你的数据库 ID
+   - 无需配置 `UPSTASH_URL` 和 `UPSTASH_TOKEN`
+
+**7. 配置外部定时任务（可选）**
 
 可使用外部定时请求/api/cron/mtvpls端点以触发定时任务，或新建一个workers请求触发，推荐每小时请求一次。
 
@@ -330,7 +341,7 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 | SITE_BASE                                | 站点 url                                                     | 形如 https://example.com    | 空                                                           |
 | NEXT_PUBLIC_SITE_NAME                    | 站点名称                                                     | 任意字符串                  | MoonTV                                                       |
 | ANNOUNCEMENT                             | 站点公告                                                     | 任意字符串                  | 本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。 |
-| NEXT_PUBLIC_STORAGE_TYPE                 | 播放记录/收藏的存储方式                                      | redis、kvrocks、upstash     | 无默认，必填字段                                             |
+| NEXT_PUBLIC_STORAGE_TYPE                 | 播放记录/收藏的存储方式                                      | redis、kvrocks、upstash、d1 | 无默认，必填字段                                             |
 | KVROCKS_URL                              | kvrocks 连接 url                                             | 连接 url                    | 空                                                           |
 | REDIS_URL                                | redis 连接 url                                               | 连接 url                    | 空                                                           |
 | UPSTASH_URL                              | upstash redis 连接 url                                       | 连接 url                    | 空                                                           |

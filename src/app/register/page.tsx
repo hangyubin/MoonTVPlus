@@ -2,7 +2,7 @@
 
 'use client';
 
-import { AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, CheckCircle, Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
@@ -250,7 +250,7 @@ function RegisterPageClient() {
       <div className='absolute top-4 right-4'>
         <ThemeToggle />
       </div>
-      <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800'>
+      <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 shadow-2xl p-10 dark:border dark:border-zinc-800'>
         <h1 className='text-green-600 tracking-tight text-center text-3xl font-extrabold mb-2 bg-clip-text drop-shadow-sm'>
           {siteName}
         </h1>
@@ -262,15 +262,20 @@ function RegisterPageClient() {
             <label htmlFor='username' className='sr-only'>
               用户名
             </label>
-            <input
-              id='username'
-              type='text'
-              autoComplete='username'
-              className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-              placeholder='输入用户名'
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
+            <div className='relative'>
+              <div className='absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none'>
+                <User className='h-5 w-5 text-gray-400 dark:text-gray-500' />
+              </div>
+              <input
+                id='username'
+                type='text'
+                autoComplete='username'
+                className='block w-full rounded-lg border-0 py-3 pl-10 pr-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60'
+                placeholder='输入用户名'
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
           </div>
 
           <div>
@@ -278,11 +283,14 @@ function RegisterPageClient() {
               密码
             </label>
             <div className='relative'>
+              <div className='absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none'>
+                <Lock className='h-5 w-5 text-gray-400 dark:text-gray-500' />
+              </div>
               <input
                 id='password'
                 type={showPassword ? 'text' : 'password'}
                 autoComplete='new-password'
-                className='block w-full rounded-lg border-0 py-3 px-4 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
+                className='block w-full rounded-lg border-0 py-3 pl-10 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60'
                 placeholder='输入密码（至少6位）'
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -306,11 +314,14 @@ function RegisterPageClient() {
               确认密码
             </label>
             <div className='relative'>
+              <div className='absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none'>
+                <Lock className='h-5 w-5 text-gray-400 dark:text-gray-500' />
+              </div>
               <input
                 id='confirmPassword'
                 type={showConfirmPassword ? 'text' : 'password'}
                 autoComplete='new-password'
-                className='block w-full rounded-lg border-0 py-3 px-4 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
+                className='block w-full rounded-lg border-0 py-3 pl-10 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60'
                 placeholder='再次输入密码'
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
