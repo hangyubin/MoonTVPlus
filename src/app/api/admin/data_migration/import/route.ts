@@ -225,6 +225,44 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+
+      // 导入音乐播放记录
+      if (user.musicPlayRecords) {
+        for (const [key, record] of Object.entries(user.musicPlayRecords)) {
+          const [platform, id] = key.split('+');
+          if (platform && id) {
+            await db.saveMusicPlayRecord(username, platform, id, record as any);
+          }
+        }
+      }
+
+      // 导入音乐歌单
+      if (user.musicPlaylists && Array.isArray(user.musicPlaylists)) {
+        for (const playlist of user.musicPlaylists) {
+          // 创建歌单
+          await db.createMusicPlaylist(username, {
+            id: playlist.id,
+            name: playlist.name,
+            description: playlist.description,
+            cover: playlist.cover,
+          });
+
+          // 导入歌单中的歌曲
+          if (playlist.songs && Array.isArray(playlist.songs)) {
+            for (const song of playlist.songs) {
+              await db.addSongToPlaylist(playlist.id, {
+                platform: song.platform,
+                id: song.id,
+                name: song.name,
+                artist: song.artist,
+                album: song.album,
+                pic: song.pic,
+                duration: song.duration || 0,
+              });
+            }
+          }
+        }
+      }
     }
 
     console.log(`成功导入 ${importedCount} 个用户的user:info`);

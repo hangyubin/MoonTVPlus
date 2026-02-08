@@ -1,6 +1,7 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
 import { AdminConfig } from './admin.types';
+import { MusicPlayRecord } from './db.client';
 import { KvrocksStorage } from './kvrocks.db';
 import { RedisStorage } from './redis.db';
 import { DanmakuFilterConfig,Favorite, IStorage, PlayRecord, SkipConfig } from './types';
@@ -199,7 +200,140 @@ export class DbManager {
     return favorite !== null;
   }
 
- 
+  // 音乐播放记录相关方法
+  async saveMusicPlayRecord(
+    userName: string,
+    platform: string,
+    id: string,
+    record: MusicPlayRecord
+  ): Promise<void> {
+    const key = generateStorageKey(platform, id);
+    await this.storage.setMusicPlayRecord(userName, key, record);
+  }
+
+  async batchSaveMusicPlayRecords(
+    userName: string,
+    records: Array<{ platform: string; id: string; record: MusicPlayRecord }>
+  ): Promise<void> {
+    const batchRecords = records.map(({ platform, id, record }) => ({
+      key: generateStorageKey(platform, id),
+      record,
+    }));
+    await this.storage.batchSetMusicPlayRecords(userName, batchRecords);
+  }
+
+  async getAllMusicPlayRecords(userName: string): Promise<{
+    [key: string]: MusicPlayRecord;
+  }> {
+    return this.storage.getAllMusicPlayRecords(userName);
+  }
+
+  async deleteMusicPlayRecord(
+    userName: string,
+    platform: string,
+    id: string
+  ): Promise<void> {
+    const key = generateStorageKey(platform, id);
+    await this.storage.deleteMusicPlayRecord(userName, key);
+  }
+
+  async clearAllMusicPlayRecords(userName: string): Promise<void> {
+    await this.storage.clearAllMusicPlayRecords(userName);
+  }
+
+  // 音乐歌单相关方法
+  async createMusicPlaylist(
+    userName: string,
+    playlist: {
+      id: string;
+      name: string;
+      description?: string;
+      cover?: string;
+    }
+  ): Promise<void> {
+    if (typeof (this.storage as any).createMusicPlaylist === 'function') {
+      await (this.storage as any).createMusicPlaylist(userName, playlist);
+    }
+  }
+
+  async getMusicPlaylist(playlistId: string): Promise<any | null> {
+    if (typeof (this.storage as any).getMusicPlaylist === 'function') {
+      return (this.storage as any).getMusicPlaylist(playlistId);
+    }
+    return null;
+  }
+
+  async getUserMusicPlaylists(userName: string): Promise<any[]> {
+    if (typeof (this.storage as any).getUserMusicPlaylists === 'function') {
+      return (this.storage as any).getUserMusicPlaylists(userName);
+    }
+    return [];
+  }
+
+  async updateMusicPlaylist(
+    playlistId: string,
+    updates: {
+      name?: string;
+      description?: string;
+      cover?: string;
+    }
+  ): Promise<void> {
+    if (typeof (this.storage as any).updateMusicPlaylist === 'function') {
+      await (this.storage as any).updateMusicPlaylist(playlistId, updates);
+    }
+  }
+
+  async deleteMusicPlaylist(playlistId: string): Promise<void> {
+    if (typeof (this.storage as any).deleteMusicPlaylist === 'function') {
+      await (this.storage as any).deleteMusicPlaylist(playlistId);
+    }
+  }
+
+  async addSongToPlaylist(
+    playlistId: string,
+    song: {
+      platform: string;
+      id: string;
+      name: string;
+      artist: string;
+      album?: string;
+      pic?: string;
+      duration: number;
+    }
+  ): Promise<void> {
+    if (typeof (this.storage as any).addSongToPlaylist === 'function') {
+      await (this.storage as any).addSongToPlaylist(playlistId, song);
+    }
+  }
+
+  async removeSongFromPlaylist(
+    playlistId: string,
+    platform: string,
+    songId: string
+  ): Promise<void> {
+    if (typeof (this.storage as any).removeSongFromPlaylist === 'function') {
+      await (this.storage as any).removeSongFromPlaylist(playlistId, platform, songId);
+    }
+  }
+
+  async getPlaylistSongs(playlistId: string): Promise<any[]> {
+    if (typeof (this.storage as any).getPlaylistSongs === 'function') {
+      return (this.storage as any).getPlaylistSongs(playlistId);
+    }
+    return [];
+  }
+
+  async isSongInPlaylist(
+    playlistId: string,
+    platform: string,
+    songId: string
+  ): Promise<boolean> {
+    if (typeof (this.storage as any).isSongInPlaylist === 'function') {
+      return (this.storage as any).isSongInPlaylist(playlistId, platform, songId);
+    }
+    return false;
+  }
+
   async verifyUser(userName: string, password: string): Promise<boolean> {
     return this.storage.verifyUser(userName, password);
   }

@@ -27,7 +27,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   // 处理播放记录数据更新的函数
-  const updatePlayRecords = (allRecords: Record<string, PlayRecord>) => {
+  const updatePlayRecords = (allRecords: Record<string, PlayRecord>, limit?: number) => {
     // 将记录转换为数组并根据 save_time 由近到远排序
     const recordsArray = Object.entries(allRecords).map(([key, record]) => ({
       ...record,
@@ -39,7 +39,10 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
       (a, b) => b.save_time - a.save_time
     );
 
-    setPlayRecords(sortedRecords);
+    // 如果指定了 limit，只取前 N 条
+    const finalRecords = limit ? sortedRecords.slice(0, limit) : sortedRecords;
+
+    setPlayRecords(finalRecords);
   };
 
   useEffect(() => {
@@ -49,7 +52,14 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
 
         // 从缓存或API获取所有播放记录
         const allRecords = await getAllPlayRecords();
-        updatePlayRecords(allRecords);
+
+        // 非 localStorage 模式下，先只显示前 10 条记录
+        const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
+        if (storageType !== 'localstorage') {
+          updatePlayRecords(allRecords, 10);
+        } else {
+          updatePlayRecords(allRecords);
+        }
       } catch (error) {
         console.error('获取播放记录失败:', error);
         setPlayRecords([]);
@@ -64,6 +74,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
     const unsubscribe = subscribeToDataUpdates(
       'playRecordsUpdated',
       (newRecords: Record<string, PlayRecord>) => {
+        // 同步完成后，加载完整数据（不限制数量）
         updatePlayRecords(newRecords);
       }
     );

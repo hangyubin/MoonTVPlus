@@ -86,6 +86,7 @@ export default async function RootLayout({
   let enableMovieRequest = true;
   let webLiveEnabled = false;
   let customAdFilterVersion = 0;
+  let tuneHubEnabled = false;
   let customCategories = [] as {
     name: string;
     type: 'movie' | 'tv';
@@ -134,6 +135,8 @@ export default async function RootLayout({
     webLiveEnabled = config.WebLiveEnabled ?? false;
     // 自定义去广告代码版本号
     customAdFilterVersion = config.SiteConfig?.CustomAdFilterVersion || 0;
+    // TuneHub音乐功能配置
+    tuneHubEnabled = config.MusicConfig?.TuneHubEnabled || false;
     // 检查是否启用了 OpenList 功能
     openListEnabled = !!(
       config.OpenListConfig?.Enabled &&
@@ -191,6 +194,7 @@ export default async function RootLayout({
     ENABLE_MOVIE_REQUEST: enableMovieRequest,
     WEB_LIVE_ENABLED: webLiveEnabled,
     CUSTOM_AD_FILTER_VERSION: customAdFilterVersion,
+    TUNEHUB_ENABLED: tuneHubEnabled,
     FESTIVE_EFFECT_ENABLED:
       process.env.FESTIVE_EFFECT_ENABLED === 'true',
   };

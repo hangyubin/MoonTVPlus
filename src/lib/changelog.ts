@@ -11,6 +11,28 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
 	{
+    version: '212.0.0',
+    date: '2026-02-07',
+	added: [
+		"接入Tunehub实现音乐播放",
+		"网络直播支持观影室同步",
+		"详情图片点击可预览",
+		"oidc登录图标自动识别多平台"
+    ],
+    changed: [
+		"获取用户站长无信息时返回默认值兜底",
+		"继续观看使用渐进式加载模式",
+		"openlist根路径主动移除bom防止获取根目录失效",
+		"webgpu缓冲区大小调整",
+		"设备管理可识别OrionTv"
+    ],
+    fixed: [
+		"修复与upstash合并数据源时丢失的用户缓存信息",
+		"修复登录页面不处理error参数",
+		"修复safari视频切换集数无法清理旧视频",
+		"修复部分tmdb接口在cloudflare下无法使用"
+	]
+	},{
     version: '211.0.0',
     date: '2026-02-01',
 	added: [

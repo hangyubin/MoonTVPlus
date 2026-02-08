@@ -35,6 +35,7 @@ import {
   FolderOpen,
   Globe,
   Mail,
+  Music,
   Palette,
   Settings,
   Tv,
@@ -6742,6 +6743,350 @@ const ThemeConfigComponent = ({
   );
 };
 
+// 音乐配置组件
+const MusicConfigComponent = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+
+  const [musicSettings, setMusicSettings] = useState({
+    TuneHubEnabled: false,
+    TuneHubBaseUrl: 'https://tunehub.sayqz.com/api',
+    TuneHubApiKey: '',
+    OpenListCacheEnabled: false,
+    OpenListCacheURL: '',
+    OpenListCacheUsername: '',
+    OpenListCachePassword: '',
+    OpenListCachePath: '/music-cache',
+    OpenListCacheProxyEnabled: true,
+  });
+
+  // 从配置加载音乐设置
+  useEffect(() => {
+    if (config?.MusicConfig) {
+      setMusicSettings({
+        TuneHubEnabled: config.MusicConfig.TuneHubEnabled ?? false,
+        TuneHubBaseUrl: config.MusicConfig.TuneHubBaseUrl ?? 'https://tunehub.sayqz.com/api',
+        TuneHubApiKey: config.MusicConfig.TuneHubApiKey ?? '',
+        OpenListCacheEnabled: config.MusicConfig.OpenListCacheEnabled ?? false,
+        OpenListCacheURL: config.MusicConfig.OpenListCacheURL ?? '',
+        OpenListCacheUsername: config.MusicConfig.OpenListCacheUsername ?? '',
+        OpenListCachePassword: config.MusicConfig.OpenListCachePassword ?? '',
+        OpenListCachePath: config.MusicConfig.OpenListCachePath ?? '/music-cache',
+        OpenListCacheProxyEnabled: config.MusicConfig.OpenListCacheProxyEnabled ?? true,
+      });
+    }
+  }, [config]);
+
+  const handleSave = async () => {
+    await withLoading('saveMusicConfig', async () => {
+      try {
+        const resp = await fetch('/api/admin/music', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...musicSettings }),
+        });
+
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data.error || '保存失败');
+        }
+
+        showAlert({ type: 'success', title: '保存成功', message: '音乐配置已更新', timer: 2000 });
+        await refreshConfig();
+      } catch (error: any) {
+        showAlert({ type: 'error', title: '保存失败', message: error.message || '未知错误', showConfirm: true });
+      }
+    });
+  };
+
+  return (
+    <div className='space-y-6'>
+      {/* TuneHub 音乐配置 */}
+      <div className='space-y-4'>
+        <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+          TuneHub 音乐配置
+        </h3>
+
+        {/* 开启音乐功能 */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              开启音乐功能
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setMusicSettings((prev) => ({
+                  ...prev,
+                  TuneHubEnabled: !prev.TuneHubEnabled,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                musicSettings.TuneHubEnabled
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  musicSettings.TuneHubEnabled
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后将在首页显示音乐视听入口，支持网易云、QQ音乐、酷我音乐
+          </p>
+        </div>
+
+        {/* TuneHub Base URL */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            TuneHub API 地址
+          </label>
+          <input
+            type='text'
+            placeholder='https://tunehub.sayqz.com/api'
+            value={musicSettings.TuneHubBaseUrl}
+            onChange={(e) =>
+              setMusicSettings((prev) => ({
+                ...prev,
+                TuneHubBaseUrl: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            TuneHub API 的基础地址，默认为 https://tunehub.sayqz.com/api。也可以通过环境变量 TUNEHUB_BASE_URL 配置
+          </p>
+        </div>
+
+        {/* TuneHub API Key */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            TuneHub API Key
+          </label>
+          <input
+            type='password'
+            placeholder='th_your_api_key_here'
+            value={musicSettings.TuneHubApiKey}
+            onChange={(e) =>
+              setMusicSettings((prev) => ({
+                ...prev,
+                TuneHubApiKey: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            用于解析歌曲播放链接的 API Key（消耗积分）。搜索、榜单、歌单等功能不需要 Key。也可以通过环境变量 TUNEHUB_API_KEY 配置
+          </p>
+        </div>
+      </div>
+
+      {/* OpenList 缓存配置 */}
+      <div className='space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700'>
+        <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+          OpenList 缓存配置
+        </h3>
+
+        {/* 开启 OpenList 缓存 */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              开启 OpenList 缓存
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setMusicSettings((prev) => ({
+                  ...prev,
+                  OpenListCacheEnabled: !prev.OpenListCacheEnabled,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                musicSettings.OpenListCacheEnabled
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  musicSettings.OpenListCacheEnabled
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后将音乐解析结果（播放链接、歌词、元信息）和音频文件缓存到 OpenList，减少 API 调用次数并支持离线播放
+          </p>
+        </div>
+
+        {/* OpenList URL */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OpenList 服务器地址
+          </label>
+          <input
+            type='text'
+            placeholder='https://your-openlist-server.com'
+            value={musicSettings.OpenListCacheURL}
+            onChange={(e) =>
+              setMusicSettings((prev) => ({
+                ...prev,
+                OpenListCacheURL: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            OpenList 服务器的完整地址（例如：https://your-openlist-server.com）
+          </p>
+        </div>
+
+        {/* OpenList 用户名 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OpenList 用户名
+          </label>
+          <input
+            type='text'
+            placeholder='admin'
+            value={musicSettings.OpenListCacheUsername}
+            onChange={(e) =>
+              setMusicSettings((prev) => ({
+                ...prev,
+                OpenListCacheUsername: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+        </div>
+
+        {/* OpenList 密码 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OpenList 密码
+          </label>
+          <input
+            type='password'
+            placeholder='••••••••'
+            value={musicSettings.OpenListCachePassword}
+            onChange={(e) =>
+              setMusicSettings((prev) => ({
+                ...prev,
+                OpenListCachePassword: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            用于登录 OpenList 并获取访问权限
+          </p>
+        </div>
+
+        {/* OpenList 缓存目录 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            缓存目录路径
+          </label>
+          <input
+            type='text'
+            placeholder='/music-cache'
+            value={musicSettings.OpenListCachePath}
+            onChange={(e) =>
+              setMusicSettings((prev) => ({
+                ...prev,
+                OpenListCachePath: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            音乐缓存在 OpenList 中的存储目录（例如：/music-cache）
+          </p>
+        </div>
+
+        {/* 缓存代理返回开关 */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              启用缓存代理返回
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setMusicSettings((prev) => ({
+                  ...prev,
+                  OpenListCacheProxyEnabled: !prev.OpenListCacheProxyEnabled,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                musicSettings.OpenListCacheProxyEnabled
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  musicSettings.OpenListCacheProxyEnabled
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后，如果 OpenList 有缓存，将通过代理方式返回给前端，并设置永久缓存头，提升加载速度
+          </p>
+        </div>
+      </div>
+
+      {/* 操作按钮 */}
+      <div className='flex justify-end'>
+        <button
+          onClick={handleSave}
+          disabled={isLoading('saveMusicConfig')}
+          className={`px-4 py-2 ${
+            isLoading('saveMusicConfig')
+              ? buttonStyles.disabled
+              : buttonStyles.success
+          } rounded-lg transition-colors`}
+        >
+          {isLoading('saveMusicConfig') ? '保存中…' : '保存'}
+        </button>
+      </div>
+
+      {/* 弹窗 */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+      />
+    </div>
+  );
+};
+
 // 新增站点配置组件
 const SiteConfigComponent = ({
   config,
@@ -11261,6 +11606,7 @@ function AdminPageClient() {
     liveSource: false,
     webLive: false,
     siteConfig: false,
+    musicConfig: false,
     registrationConfig: false,
     categoryConfig: false,
     configFile: false,
@@ -11597,6 +11943,21 @@ function AdminPageClient() {
                 fetchUsersV2={fetchUsersV2}
                 userListLoading={userListLoading}
               />
+            </CollapsibleTab>
+
+            {/* 音乐配置标签 */}
+            <CollapsibleTab
+              title='音乐配置'
+              icon={
+                <Music
+                  size={20}
+                  className='text-gray-600 dark:text-gray-400'
+                />
+              }
+              isExpanded={expandedTabs.musicConfig}
+              onToggle={() => toggleTab('musicConfig')}
+            >
+              <MusicConfigComponent config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
             {/* 视频源配置标签 */}

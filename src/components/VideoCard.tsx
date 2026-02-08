@@ -27,6 +27,7 @@ import { useLongPress } from '@/hooks/useLongPress';
 import AIChatPanel from '@/components/AIChatPanel';
 import DetailPanel from '@/components/DetailPanel';
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
+import ImageViewer from '@/components/ImageViewer';
 import MobileActionSheet from '@/components/MobileActionSheet';
 
 export interface VideoCardProps {
@@ -112,6 +113,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiDefaultMessageWithVideo, setAiDefaultMessageWithVideo] = useState('');
   const [showDetailPanel, setShowDetailPanel] = useState(false);
+  const [showImageViewer, setShowImageViewer] = useState(false);
 
   // 检查AI功能是否启用
   useEffect(() => {
@@ -734,6 +736,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
               referrerPolicy='no-referrer'
               loading='lazy'
               onLoadingComplete={() => setIsLoading(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowImageViewer(true);
+              }}
               onError={(e) => {
                 // 图片加载失败时的重试机制
                 const img = e.target as HTMLImageElement;
@@ -749,7 +755,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                 WebkitUserSelect: 'none',
                 userSelect: 'none',
                 WebkitTouchCallout: 'none',
-                pointerEvents: 'none', // 图片不响应任何指针事件
+                pointerEvents: 'auto', // 改为auto以响应点击事件
+                cursor: 'pointer', // 添加指针样式
               } as React.CSSProperties}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -1478,6 +1485,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
         currentEpisode={currentEpisode}
         totalEpisodes={actualEpisodes}
         origin={origin}
+        onPosterClick={() => {
+          setShowImageViewer(true);
+        }}
       />
 
       {/* AI问片面板 */}
@@ -1513,6 +1523,16 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
           cmsData={cmsData}
           sourceId={id}
           source={source}
+        />
+      )}
+
+      {/* 图片查看器 */}
+      {showImageViewer && (
+        <ImageViewer
+          isOpen={showImageViewer}
+          onClose={() => setShowImageViewer(false)}
+          imageUrl={processImageUrl(actualPoster)}
+          alt={actualTitle}
         />
       )}
     </>

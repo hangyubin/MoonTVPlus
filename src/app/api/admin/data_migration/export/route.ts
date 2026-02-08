@@ -94,6 +94,17 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // 获取用户的所有歌单
+      const playlists = await db.getUserMusicPlaylists(username);
+      const playlistsWithSongs = [];
+      for (const playlist of playlists) {
+        const songs = await db.getPlaylistSongs(playlist.id);
+        playlistsWithSongs.push({
+          ...playlist,
+          songs
+        });
+      }
+
       const userData = {
         // 播放记录
         playRecords: await db.getAllPlayRecords(username),
@@ -103,6 +114,10 @@ export async function POST(req: NextRequest) {
         searchHistory: await db.getSearchHistory(username),
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
+        // 音乐播放记录
+        musicPlayRecords: await db.getAllMusicPlayRecords(username),
+        // 音乐歌单（包含歌曲）
+        musicPlaylists: playlistsWithSongs,
         // V2用户的加密密码
         passwordV2: finalPasswordV2
       };
