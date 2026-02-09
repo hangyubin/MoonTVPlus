@@ -1006,11 +1006,37 @@ export abstract class BaseRedisStorage implements IStorage {
         const ownerInfo = {
           role: 'owner' as const,
           banned: false,
-          created_at: 0,
-          playrecord_migrated: false,
-          favorite_migrated: false,
-          skip_migrated: false,
+          created_at: Date.now(),
+          playrecord_migrated: true,
+          favorite_migrated: true,
+          skip_migrated: true,
         };
+
+        // 为站长创建数据库记录
+        try {
+          const userInfo: Record<string, string> = {
+            role: 'owner',
+            banned: 'false',
+            created_at: ownerInfo.created_at.toString(),
+            playrecord_migrated: 'true',
+            favorite_migrated: 'true',
+            skip_migrated: 'true',
+          };
+
+          await this.withRetry(() => this.adapter.hSet(this.userInfoKey(userName), userInfo));
+
+          // 添加到用户列表（Sorted Set，按注册时间排序）
+          await this.withRetry(() => this.adapter.zAdd(this.userListKey(), {
+            score: ownerInfo.created_at,
+            value: userName,
+          }));
+
+          console.log(`Created database record for site owner: ${userName}`);
+        } catch (insertErr) {
+          console.error('Failed to create owner record:', insertErr);
+          // 即使插入失败，仍然返回默认信息
+        }
+
         // 缓存站长信息
         userInfoCache?.set(userName, ownerInfo);
         return ownerInfo;

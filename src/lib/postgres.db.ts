@@ -1,7 +1,9 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any */
 
 /**
- * D1 Storage Implementation
+ * Vercel Postgres Storage Implementation
+ *
+ * 兼容 D1Storage 的接口，使用 Vercel Postgres 作为后端
  *
  * 注意：此模块仅在服务端使用，通过 webpack 配置排除客户端打包
  */
@@ -17,29 +19,28 @@ import {
 } from './types';
 import { AdminConfig } from './admin.types';
 import { DatabaseAdapter } from './d1-adapter';
-import { userInfoCache } from './user-cache';
 
 /**
- * Cloudflare D1 存储实现
+ * Vercel Postgres 存储实现
  *
  * 特点：
- * - 开发环境：使用 better-sqlite3（本地 SQLite 文件）
- * - 生产环境：使用 Cloudflare D1（云端分布式数据库）
- * - 统一接口：通过 DatabaseAdapter 抽象层实现
+ * - 兼容 D1Storage 的所有接口
+ * - 使用 Vercel Postgres (Neon) 作为数据库
+ * - 支持 Vercel serverless 部署
  *
  * 使用方式：
- * 1. 设置环境变量：NEXT_PUBLIC_STORAGE_TYPE=d1
- * 2. 开发环境：运行 npm run init:sqlite
- * 3. 生产环境：配置 wrangler.toml 并运行迁移
+ * 1. 设置环境变量：NEXT_PUBLIC_STORAGE_TYPE=postgres
+ * 2. 配置 POSTGRES_URL 环境变量
+ * 3. 运行数据库迁移脚本
  */
-export class D1Storage implements IStorage {
+export class PostgresStorage implements IStorage {
   private db: DatabaseAdapter;
-  public adapter: RedisHashAdapter;
+  public adapter: any; // 用于兼容
 
   constructor(adapter: DatabaseAdapter) {
     this.db = adapter;
-    // 创建 Redis Hash 兼容适配器用于设备管理
-    this.adapter = new RedisHashAdapter(adapter);
+    // 创建一个简单的适配器用于设备管理
+    this.adapter = new PostgresRedisHashAdapter(adapter);
   }
 
   // ==================== 播放记录 ====================
@@ -47,14 +48,14 @@ export class D1Storage implements IStorage {
   async getPlayRecord(userName: string, key: string): Promise<PlayRecord | null> {
     try {
       const result = await this.db
-        .prepare('SELECT * FROM play_records WHERE username = ? AND key = ?')
+        .prepare('SELECT * FROM play_records WHERE username = $1 AND key = $2')
         .bind(userName, key)
         .first();
 
       if (!result) return null;
       return this.rowToPlayRecord(result);
     } catch (err) {
-      console.error('D1Storage.getPlayRecord error:', err);
+      console.error('PostgresStorage.getPlayRecord error:', err);
       throw err;
     }
   }
@@ -68,18 +69,18 @@ export class D1Storage implements IStorage {
             episode_index, total_episodes, play_time, total_time,
             save_time, search_title
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(username, key) DO UPDATE SET
-            title = excluded.title,
-            source_name = excluded.source_name,
-            cover = excluded.cover,
-            year = excluded.year,
-            episode_index = excluded.episode_index,
-            total_episodes = excluded.total_episodes,
-            play_time = excluded.play_time,
-            total_time = excluded.total_time,
-            save_time = excluded.save_time,
-            search_title = excluded.search_title
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          ON CONFLICT (username, key) DO UPDATE SET
+            title = EXCLUDED.title,
+            source_name = EXCLUDED.source_name,
+            cover = EXCLUDED.cover,
+            year = EXCLUDED.year,
+            episode_index = EXCLUDED.episode_index,
+            total_episodes = EXCLUDED.total_episodes,
+            play_time = EXCLUDED.play_time,
+            total_time = EXCLUDED.total_time,
+            save_time = EXCLUDED.save_time,
+            search_title = EXCLUDED.search_title
         `)
         .bind(
           userName,
@@ -97,7 +98,7 @@ export class D1Storage implements IStorage {
         )
         .run();
     } catch (err) {
-      console.error('D1Storage.setPlayRecord error:', err);
+      console.error('PostgresStorage.setPlayRecord error:', err);
       throw err;
     }
   }
@@ -105,7 +106,7 @@ export class D1Storage implements IStorage {
   async getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }> {
     try {
       const results = await this.db
-        .prepare('SELECT * FROM play_records WHERE username = ? ORDER BY save_time DESC')
+        .prepare('SELECT * FROM play_records WHERE username = $1 ORDER BY save_time DESC')
         .bind(userName)
         .all();
 
@@ -118,7 +119,7 @@ export class D1Storage implements IStorage {
       }
       return records;
     } catch (err) {
-      console.error('D1Storage.getAllPlayRecords error:', err);
+      console.error('PostgresStorage.getAllPlayRecords error:', err);
       throw err;
     }
   }
@@ -126,11 +127,11 @@ export class D1Storage implements IStorage {
   async deletePlayRecord(userName: string, key: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM play_records WHERE username = ? AND key = ?')
+        .prepare('DELETE FROM play_records WHERE username = $1 AND key = $2')
         .bind(userName, key)
         .run();
     } catch (err) {
-      console.error('D1Storage.deletePlayRecord error:', err);
+      console.error('PostgresStorage.deletePlayRecord error:', err);
       throw err;
     }
   }
@@ -142,7 +143,7 @@ export class D1Storage implements IStorage {
 
       // 检查记录数量
       const countResult = await this.db
-        .prepare('SELECT COUNT(*) as count FROM play_records WHERE username = ?')
+        .prepare('SELECT COUNT(*) as count FROM play_records WHERE username = $1')
         .bind(userName)
         .first();
 
@@ -153,37 +154,32 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           DELETE FROM play_records
-          WHERE username = ?
+          WHERE username = $1
           AND key NOT IN (
             SELECT key FROM play_records
-            WHERE username = ?
+            WHERE username = $1
             ORDER BY save_time DESC
-            LIMIT ?
+            LIMIT $2
           )
         `)
-        .bind(userName, userName, maxRecords)
+        .bind(userName, maxRecords)
         .run();
 
-      console.log(`D1Storage: Cleaned up old play records for user ${userName}`);
+      console.log(`PostgresStorage: Cleaned up old play records for user ${userName}`);
     } catch (err) {
-      console.error('D1Storage.cleanupOldPlayRecords error:', err);
+      console.error('PostgresStorage.cleanupOldPlayRecords error:', err);
       throw err;
     }
   }
 
   async migratePlayRecords(userName: string): Promise<void> {
-    // D1 是新系统，不需要迁移
-    // 只需标记为已迁移
     try {
       await this.db
-        .prepare('UPDATE users SET playrecord_migrated = 1 WHERE username = ?')
+        .prepare('UPDATE users SET playrecord_migrated = 1 WHERE username = $1')
         .bind(userName)
         .run();
-
-      // 清除缓存
-      userInfoCache?.delete(userName);
     } catch (err) {
-      console.error('D1Storage.migratePlayRecords error:', err);
+      console.error('PostgresStorage.migratePlayRecords error:', err);
     }
   }
 
@@ -192,14 +188,14 @@ export class D1Storage implements IStorage {
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     try {
       const result = await this.db
-        .prepare('SELECT * FROM favorites WHERE username = ? AND key = ?')
+        .prepare('SELECT * FROM favorites WHERE username = $1 AND key = $2')
         .bind(userName, key)
         .first();
 
       if (!result) return null;
       return this.rowToFavorite(result);
     } catch (err) {
-      console.error('D1Storage.getFavorite error:', err);
+      console.error('PostgresStorage.getFavorite error:', err);
       throw err;
     }
   }
@@ -213,18 +209,18 @@ export class D1Storage implements IStorage {
             year, cover, save_time, search_title, origin,
             is_completed, vod_remarks
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(username, key) DO UPDATE SET
-            source_name = excluded.source_name,
-            total_episodes = excluded.total_episodes,
-            title = excluded.title,
-            year = excluded.year,
-            cover = excluded.cover,
-            save_time = excluded.save_time,
-            search_title = excluded.search_title,
-            origin = excluded.origin,
-            is_completed = excluded.is_completed,
-            vod_remarks = excluded.vod_remarks
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          ON CONFLICT (username, key) DO UPDATE SET
+            source_name = EXCLUDED.source_name,
+            total_episodes = EXCLUDED.total_episodes,
+            title = EXCLUDED.title,
+            year = EXCLUDED.year,
+            cover = EXCLUDED.cover,
+            save_time = EXCLUDED.save_time,
+            search_title = EXCLUDED.search_title,
+            origin = EXCLUDED.origin,
+            is_completed = EXCLUDED.is_completed,
+            vod_remarks = EXCLUDED.vod_remarks
         `)
         .bind(
           userName,
@@ -242,7 +238,7 @@ export class D1Storage implements IStorage {
         )
         .run();
     } catch (err) {
-      console.error('D1Storage.setFavorite error:', err);
+      console.error('PostgresStorage.setFavorite error:', err);
       throw err;
     }
   }
@@ -250,7 +246,7 @@ export class D1Storage implements IStorage {
   async getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }> {
     try {
       const results = await this.db
-        .prepare('SELECT * FROM favorites WHERE username = ? ORDER BY save_time DESC')
+        .prepare('SELECT * FROM favorites WHERE username = $1 ORDER BY save_time DESC')
         .bind(userName)
         .all();
 
@@ -263,7 +259,7 @@ export class D1Storage implements IStorage {
       }
       return favorites;
     } catch (err) {
-      console.error('D1Storage.getAllFavorites error:', err);
+      console.error('PostgresStorage.getAllFavorites error:', err);
       throw err;
     }
   }
@@ -271,445 +267,23 @@ export class D1Storage implements IStorage {
   async deleteFavorite(userName: string, key: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM favorites WHERE username = ? AND key = ?')
+        .prepare('DELETE FROM favorites WHERE username = $1 AND key = $2')
         .bind(userName, key)
         .run();
     } catch (err) {
-      console.error('D1Storage.deleteFavorite error:', err);
+      console.error('PostgresStorage.deleteFavorite error:', err);
       throw err;
     }
   }
 
   async migrateFavorites(userName: string): Promise<void> {
-    // D1 是新系统，不需要迁移
     try {
       await this.db
-        .prepare('UPDATE users SET favorite_migrated = 1 WHERE username = ?')
-        .bind(userName)
-        .run();
-
-      // 清除缓存
-      userInfoCache?.delete(userName);
-    } catch (err) {
-      console.error('D1Storage.migrateFavorites error:', err);
-    }
-  }
-
-  // ==================== 音乐播放记录相关 ====================
-
-  async getMusicPlayRecord(userName: string, key: string): Promise<any | null> {
-    try {
-      const result = await this.db
-        .prepare('SELECT * FROM music_play_records WHERE username = ? AND key = ?')
-        .bind(userName, key)
-        .first();
-
-      if (!result) return null;
-
-      return {
-        platform: result.platform,
-        id: result.song_id,
-        name: result.name,
-        artist: result.artist,
-        album: result.album || undefined,
-        pic: result.pic || undefined,
-        play_time: result.play_time,
-        duration: result.duration,
-        save_time: result.save_time,
-      };
-    } catch (err) {
-      console.error('D1Storage.getMusicPlayRecord error:', err);
-      return null;
-    }
-  }
-
-  async setMusicPlayRecord(userName: string, key: string, record: any): Promise<void> {
-    try {
-      await this.db
-        .prepare(`
-          INSERT INTO music_play_records (username, key, platform, song_id, name, artist, album, pic, play_time, duration, save_time)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(username, key) DO UPDATE SET
-            name = excluded.name,
-            artist = excluded.artist,
-            album = excluded.album,
-            pic = excluded.pic,
-            play_time = excluded.play_time,
-            duration = excluded.duration,
-            save_time = excluded.save_time
-        `)
-        .bind(
-          userName,
-          key,
-          record.platform,
-          record.id,
-          record.name,
-          record.artist,
-          record.album || null,
-          record.pic || null,
-          record.play_time,
-          record.duration,
-          record.save_time
-        )
-        .run();
-    } catch (err) {
-      console.error('D1Storage.setMusicPlayRecord error:', err);
-      throw err;
-    }
-  }
-
-  async batchSetMusicPlayRecords(userName: string, records: { key: string; record: any }[]): Promise<void> {
-    if (records.length === 0) return;
-    if (!this.db) return;
-
-    try {
-      // 使用批量插入，D1 支持 batch 操作
-      const statements = records.map(({ key, record }) =>
-        this.db!
-          .prepare(`
-            INSERT INTO music_play_records (username, key, platform, song_id, name, artist, album, pic, play_time, duration, save_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(username, key) DO UPDATE SET
-              platform = excluded.platform,
-              song_id = excluded.song_id,
-              name = excluded.name,
-              artist = excluded.artist,
-              album = excluded.album,
-              pic = excluded.pic,
-              play_time = excluded.play_time,
-              duration = excluded.duration,
-              save_time = excluded.save_time
-          `)
-          .bind(
-            userName,
-            key,
-            record.platform,
-            record.id,
-            record.name,
-            record.artist,
-            record.album || null,
-            record.pic || null,
-            record.play_time,
-            record.duration,
-            record.save_time
-          )
-      );
-
-      if (this.db.batch) {
-        await this.db.batch(statements);
-      }
-    } catch (err) {
-      console.error('D1Storage.batchSetMusicPlayRecords error:', err);
-      throw err;
-    }
-  }
-
-  async getAllMusicPlayRecords(userName: string): Promise<{ [key: string]: any }> {
-    try {
-      const results = await this.db
-        .prepare('SELECT * FROM music_play_records WHERE username = ? ORDER BY save_time DESC')
-        .bind(userName)
-        .all();
-
-      const records: { [key: string]: any } = {};
-      if (results.results) {
-        for (const row of results.results) {
-          records[row.key as string] = {
-            platform: row.platform,
-            id: row.song_id,
-            name: row.name,
-            artist: row.artist,
-            album: row.album || undefined,
-            pic: row.pic || undefined,
-            play_time: row.play_time,
-            duration: row.duration,
-            save_time: row.save_time,
-          };
-        }
-      }
-      return records;
-    } catch (err) {
-      console.error('D1Storage.getAllMusicPlayRecords error:', err);
-      throw err;
-    }
-  }
-
-  async deleteMusicPlayRecord(userName: string, key: string): Promise<void> {
-    try {
-      await this.db
-        .prepare('DELETE FROM music_play_records WHERE username = ? AND key = ?')
-        .bind(userName, key)
-        .run();
-    } catch (err) {
-      console.error('D1Storage.deleteMusicPlayRecord error:', err);
-      throw err;
-    }
-  }
-
-  async clearAllMusicPlayRecords(userName: string): Promise<void> {
-    try {
-      await this.db
-        .prepare('DELETE FROM music_play_records WHERE username = ?')
+        .prepare('UPDATE users SET favorite_migrated = 1 WHERE username = $1')
         .bind(userName)
         .run();
     } catch (err) {
-      console.error('D1Storage.clearAllMusicPlayRecords error:', err);
-      throw err;
-    }
-  }
-
-  // ==================== 音乐歌单相关 ====================
-
-  async createMusicPlaylist(userName: string, playlist: {
-    id: string;
-    name: string;
-    description?: string;
-    cover?: string;
-  }): Promise<void> {
-    try {
-      const now = Date.now();
-      await this.db
-        .prepare(`
-          INSERT INTO music_playlists (id, username, name, description, cover, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `)
-        .bind(
-          playlist.id,
-          userName,
-          playlist.name,
-          playlist.description || null,
-          playlist.cover || null,
-          now,
-          now
-        )
-        .run();
-    } catch (err) {
-      console.error('D1Storage.createMusicPlaylist error:', err);
-      throw err;
-    }
-  }
-
-  async getMusicPlaylist(playlistId: string): Promise<any | null> {
-    try {
-      const result = await this.db
-        .prepare('SELECT * FROM music_playlists WHERE id = ?')
-        .bind(playlistId)
-        .first();
-
-      if (!result) return null;
-
-      return {
-        id: result.id,
-        username: result.username,
-        name: result.name,
-        description: result.description || undefined,
-        cover: result.cover || undefined,
-        created_at: result.created_at,
-        updated_at: result.updated_at,
-      };
-    } catch (err) {
-      console.error('D1Storage.getMusicPlaylist error:', err);
-      return null;
-    }
-  }
-
-  async getUserMusicPlaylists(userName: string): Promise<any[]> {
-    try {
-      const results = await this.db
-        .prepare('SELECT * FROM music_playlists WHERE username = ? ORDER BY created_at DESC')
-        .bind(userName)
-        .all();
-
-      if (!results.results) return [];
-
-      return results.results.map((row) => ({
-        id: row.id,
-        username: row.username,
-        name: row.name,
-        description: row.description || undefined,
-        cover: row.cover || undefined,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      }));
-    } catch (err) {
-      console.error('D1Storage.getUserMusicPlaylists error:', err);
-      return [];
-    }
-  }
-
-  async updateMusicPlaylist(playlistId: string, updates: {
-    name?: string;
-    description?: string;
-    cover?: string;
-  }): Promise<void> {
-    try {
-      const fields: string[] = [];
-      const values: any[] = [];
-
-      if (updates.name !== undefined) {
-        fields.push('name = ?');
-        values.push(updates.name);
-      }
-      if (updates.description !== undefined) {
-        fields.push('description = ?');
-        values.push(updates.description || null);
-      }
-      if (updates.cover !== undefined) {
-        fields.push('cover = ?');
-        values.push(updates.cover || null);
-      }
-
-      if (fields.length === 0) return;
-
-      fields.push('updated_at = ?');
-      values.push(Date.now());
-      values.push(playlistId);
-
-      await this.db
-        .prepare(`UPDATE music_playlists SET ${fields.join(', ')} WHERE id = ?`)
-        .bind(...values)
-        .run();
-    } catch (err) {
-      console.error('D1Storage.updateMusicPlaylist error:', err);
-      throw err;
-    }
-  }
-
-  async deleteMusicPlaylist(playlistId: string): Promise<void> {
-    try {
-      // 由于设置了 ON DELETE CASCADE，删除歌单会自动删除关联的歌曲
-      await this.db
-        .prepare('DELETE FROM music_playlists WHERE id = ?')
-        .bind(playlistId)
-        .run();
-    } catch (err) {
-      console.error('D1Storage.deleteMusicPlaylist error:', err);
-      throw err;
-    }
-  }
-
-  async addSongToPlaylist(playlistId: string, song: {
-    platform: string;
-    id: string;
-    name: string;
-    artist: string;
-    album?: string;
-    pic?: string;
-    duration: number;
-  }): Promise<void> {
-    try {
-      const now = Date.now();
-
-      // 获取当前最大的 sort_order
-      const maxOrderResult = await this.db
-        .prepare('SELECT MAX(sort_order) as max_order FROM music_playlist_songs WHERE playlist_id = ?')
-        .bind(playlistId)
-        .first();
-
-      const nextOrder = (maxOrderResult?.max_order as number || 0) + 1;
-
-      await this.db
-        .prepare(`
-          INSERT INTO music_playlist_songs (
-            playlist_id, platform, song_id, name, artist, album, pic, duration, added_at, sort_order
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(playlist_id, platform, song_id) DO UPDATE SET
-            name = excluded.name,
-            artist = excluded.artist,
-            album = excluded.album,
-            pic = excluded.pic,
-            duration = excluded.duration
-        `)
-        .bind(
-          playlistId,
-          song.platform,
-          song.id,
-          song.name,
-          song.artist,
-          song.album || null,
-          song.pic || null,
-          song.duration,
-          now,
-          nextOrder
-        )
-        .run();
-
-      // 更新歌单的 updated_at 和封面（如果是第一首歌）
-      const songCount = await this.db
-        .prepare('SELECT COUNT(*) as count FROM music_playlist_songs WHERE playlist_id = ?')
-        .bind(playlistId)
-        .first();
-
-      if ((songCount?.count as number) === 1 && song.pic) {
-        await this.updateMusicPlaylist(playlistId, { cover: song.pic });
-      } else {
-        await this.db
-          .prepare('UPDATE music_playlists SET updated_at = ? WHERE id = ?')
-          .bind(Date.now(), playlistId)
-          .run();
-      }
-    } catch (err) {
-      console.error('D1Storage.addSongToPlaylist error:', err);
-      throw err;
-    }
-  }
-
-  async removeSongFromPlaylist(playlistId: string, platform: string, songId: string): Promise<void> {
-    try {
-      await this.db
-        .prepare('DELETE FROM music_playlist_songs WHERE playlist_id = ? AND platform = ? AND song_id = ?')
-        .bind(playlistId, platform, songId)
-        .run();
-
-      // 更新歌单的 updated_at
-      await this.db
-        .prepare('UPDATE music_playlists SET updated_at = ? WHERE id = ?')
-        .bind(Date.now(), playlistId)
-        .run();
-    } catch (err) {
-      console.error('D1Storage.removeSongFromPlaylist error:', err);
-      throw err;
-    }
-  }
-
-  async getPlaylistSongs(playlistId: string): Promise<any[]> {
-    try {
-      const results = await this.db
-        .prepare('SELECT * FROM music_playlist_songs WHERE playlist_id = ? ORDER BY sort_order ASC')
-        .bind(playlistId)
-        .all();
-
-      if (!results.results) return [];
-
-      return results.results.map((row) => ({
-        platform: row.platform,
-        id: row.song_id,
-        name: row.name,
-        artist: row.artist,
-        album: row.album || undefined,
-        pic: row.pic || undefined,
-        duration: row.duration,
-        added_at: row.added_at,
-        sort_order: row.sort_order,
-      }));
-    } catch (err) {
-      console.error('D1Storage.getPlaylistSongs error:', err);
-      return [];
-    }
-  }
-
-  async isSongInPlaylist(playlistId: string, platform: string, songId: string): Promise<boolean> {
-    try {
-      const result = await this.db
-        .prepare('SELECT 1 FROM music_playlist_songs WHERE playlist_id = ? AND platform = ? AND song_id = ? LIMIT 1')
-        .bind(playlistId, platform, songId)
-        .first();
-
-      return result !== null;
-    } catch (err) {
-      console.error('D1Storage.isSongInPlaylist error:', err);
-      return false;
+      console.error('PostgresStorage.migrateFavorites error:', err);
     }
   }
 
@@ -747,7 +321,6 @@ export class D1Storage implements IStorage {
 
   // ==================== 用户管理 ====================
 
-  // SHA256 加密密码（与 Redis 保持一致）
   private async hashPassword(password: string): Promise<string> {
     const encoder = new TextEncoder();
     const data = encoder.encode(password);
@@ -764,7 +337,7 @@ export class D1Storage implements IStorage {
       }
 
       const user = await this.db
-        .prepare('SELECT password_hash FROM users WHERE username = ? AND banned = 0')
+        .prepare('SELECT password_hash FROM users WHERE username = $1 AND banned = 0')
         .bind(userName)
         .first();
 
@@ -774,7 +347,7 @@ export class D1Storage implements IStorage {
       const hashedPassword = await this.hashPassword(password);
       return user.password_hash === hashedPassword;
     } catch (err) {
-      console.error('D1Storage.verifyUser error:', err);
+      console.error('PostgresStorage.verifyUser error:', err);
       return false;
     }
   }
@@ -787,13 +360,13 @@ export class D1Storage implements IStorage {
       }
 
       const result = await this.db
-        .prepare('SELECT 1 FROM users WHERE username = ? LIMIT 1')
+        .prepare('SELECT 1 FROM users WHERE username = $1 LIMIT 1')
         .bind(userName)
         .first();
 
       return result !== null;
     } catch (err) {
-      console.error('D1Storage.checkUserExist error:', err);
+      console.error('PostgresStorage.checkUserExist error:', err);
       return false;
     }
   }
@@ -803,11 +376,11 @@ export class D1Storage implements IStorage {
       const passwordHash = await this.hashPassword(newPassword);
 
       await this.db
-        .prepare('UPDATE users SET password_hash = ? WHERE username = ?')
+        .prepare('UPDATE users SET password_hash = $1 WHERE username = $2')
         .bind(passwordHash, userName)
         .run();
     } catch (err) {
-      console.error('D1Storage.changePassword error:', err);
+      console.error('PostgresStorage.changePassword error:', err);
       throw err;
     }
   }
@@ -816,11 +389,11 @@ export class D1Storage implements IStorage {
     try {
       // 由于设置了 ON DELETE CASCADE，删除用户会自动删除相关数据
       await this.db
-        .prepare('DELETE FROM users WHERE username = ?')
+        .prepare('DELETE FROM users WHERE username = $1')
         .bind(userName)
         .run();
     } catch (err) {
-      console.error('D1Storage.deleteUser error:', err);
+      console.error('PostgresStorage.deleteUser error:', err);
       throw err;
     }
   }
@@ -834,22 +407,23 @@ export class D1Storage implements IStorage {
       if (!results.results) return [];
       return results.results.map((row) => row.username as string);
     } catch (err) {
-      console.error('D1Storage.getAllUsers error:', err);
+      console.error('PostgresStorage.getAllUsers error:', err);
       return [];
     }
   }
 
   async getUserInfoV2(userName: string): Promise<any> {
     try {
-      // 先从缓存获取
-      const cached = userInfoCache?.get(userName);
+      // 先尝试从缓存获取用户信息
+      const { userInfoCache } = await import('./user-cache');
+      const cached = userInfoCache.get(userName);
       if (cached) {
         return cached;
       }
 
-      // 先尝试从数据库获取用户信息
+      // 从数据库获取用户信息
       const user = await this.db
-        .prepare('SELECT * FROM users WHERE username = ?')
+        .prepare('SELECT * FROM users WHERE username = $1')
         .bind(userName)
         .first();
 
@@ -869,20 +443,14 @@ export class D1Storage implements IStorage {
           emailNotifications: user.email_notifications === 1,
         };
 
-        // 如果是站长，强制将 role 设置为 owner
-        if (userName === process.env.USERNAME) {
-          userInfo.role = 'owner';
-        }
-
-        // 写入缓存
-        userInfoCache?.set(userName, userInfo);
+        // 缓存用户信息
+        userInfoCache.set(userName, userInfo);
 
         return userInfo;
       }
 
       // 如果数据库中没有，检查是否是环境变量中的站长
       if (userName === process.env.USERNAME) {
-        // 站长即使数据库没有数据，也返回默认信息
         const ownerInfo = {
           role: 'owner' as const,
           banned: false,
@@ -900,7 +468,7 @@ export class D1Storage implements IStorage {
                 username, password_hash, role, banned, created_at,
                 playrecord_migrated, favorite_migrated, skip_migrated
               )
-              VALUES (?, ?, ?, 0, ?, 1, 1, 1)
+              VALUES ($1, $2, $3, 0, $4, 1, 1, 1)
             `)
             .bind(
               userName,
@@ -916,18 +484,19 @@ export class D1Storage implements IStorage {
         }
 
         // 缓存站长信息
-        userInfoCache?.set(userName, ownerInfo);
+        userInfoCache.set(userName, ownerInfo);
+
         return ownerInfo;
       }
 
       return null;
     } catch (err) {
-      console.error('D1Storage.getUserInfoV2 error:', err);
+      console.error('PostgresStorage.getUserInfoV2 error:', err);
       return null;
     }
   }
 
-  async createUserV2?(
+  async createUserV2(
     userName: string,
     password: string,
     role: 'owner' | 'admin' | 'user',
@@ -945,7 +514,7 @@ export class D1Storage implements IStorage {
             enabled_apis, created_at, playrecord_migrated,
             favorite_migrated, skip_migrated
           )
-          VALUES (?, ?, ?, 0, ?, ?, ?, ?, 1, 1, 1)
+          VALUES ($1, $2, $3, 0, $4, $5, $6, $7, 1, 1, 1)
         `)
         .bind(
           userName,
@@ -957,11 +526,8 @@ export class D1Storage implements IStorage {
           Date.now()
         )
         .run();
-
-      // 清除缓存
-      userInfoCache?.delete(userName);
     } catch (err) {
-      console.error('D1Storage.createUserV2 error:', err);
+      console.error('PostgresStorage.createUserV2 error:', err);
       throw err;
     }
   }
@@ -1022,7 +588,7 @@ export class D1Storage implements IStorage {
           SELECT username, role, banned, tags, oidc_sub, enabled_apis, created_at
           FROM users
           ORDER BY created_at DESC
-          LIMIT ? OFFSET ?
+          LIMIT $1 OFFSET $2
         `)
         .bind(actualLimit, actualOffset)
         .all();
@@ -1064,7 +630,7 @@ export class D1Storage implements IStorage {
 
       return { users, total };
     } catch (err) {
-      console.error('D1Storage.getUserListV2 error:', err);
+      console.error('PostgresStorage.getUserListV2 error:', err);
       return { users: [], total: 0 };
     }
   }
@@ -1072,7 +638,7 @@ export class D1Storage implements IStorage {
   async verifyUserV2(userName: string, password: string): Promise<boolean> {
     try {
       const user = await this.db
-        .prepare('SELECT password_hash FROM users WHERE username = ?')
+        .prepare('SELECT password_hash FROM users WHERE username = $1')
         .bind(userName)
         .first();
 
@@ -1081,7 +647,7 @@ export class D1Storage implements IStorage {
       const hashedPassword = await this.hashPassword(password);
       return user.password_hash === hashedPassword;
     } catch (err) {
-      console.error('D1Storage.verifyUserV2 error:', err);
+      console.error('PostgresStorage.verifyUserV2 error:', err);
       return false;
     }
   }
@@ -1099,25 +665,26 @@ export class D1Storage implements IStorage {
     try {
       const fields: string[] = [];
       const values: any[] = [];
+      let paramIndex = 1;
 
       if (updates.role !== undefined) {
-        fields.push('role = ?');
+        fields.push(`role = $${paramIndex++}`);
         values.push(updates.role);
       }
       if (updates.banned !== undefined) {
-        fields.push('banned = ?');
+        fields.push(`banned = $${paramIndex++}`);
         values.push(updates.banned ? 1 : 0);
       }
       if (updates.tags !== undefined) {
-        fields.push('tags = ?');
+        fields.push(`tags = $${paramIndex++}`);
         values.push(JSON.stringify(updates.tags));
       }
       if (updates.oidcSub !== undefined) {
-        fields.push('oidc_sub = ?');
+        fields.push(`oidc_sub = $${paramIndex++}`);
         values.push(updates.oidcSub);
       }
       if (updates.enabledApis !== undefined) {
-        fields.push('enabled_apis = ?');
+        fields.push(`enabled_apis = $${paramIndex++}`);
         values.push(JSON.stringify(updates.enabledApis));
       }
 
@@ -1126,14 +693,15 @@ export class D1Storage implements IStorage {
       values.push(userName);
 
       await this.db
-        .prepare(`UPDATE users SET ${fields.join(', ')} WHERE username = ?`)
+        .prepare(`UPDATE users SET ${fields.join(', ')} WHERE username = $${paramIndex}`)
         .bind(...values)
         .run();
 
-      // 清除缓存
-      userInfoCache?.delete(userName);
+      // 清除用户信息缓存
+      const { userInfoCache } = await import('./user-cache');
+      userInfoCache.delete(userName);
     } catch (err) {
-      console.error('D1Storage.updateUserInfoV2 error:', err);
+      console.error('PostgresStorage.updateUserInfoV2 error:', err);
       throw err;
     }
   }
@@ -1143,14 +711,11 @@ export class D1Storage implements IStorage {
       const passwordHash = await this.hashPassword(newPassword);
 
       await this.db
-        .prepare('UPDATE users SET password_hash = ? WHERE username = ?')
+        .prepare('UPDATE users SET password_hash = $1 WHERE username = $2')
         .bind(passwordHash, userName)
         .run();
-
-      // 清除缓存
-      userInfoCache?.delete(userName);
     } catch (err) {
-      console.error('D1Storage.changePasswordV2 error:', err);
+      console.error('PostgresStorage.changePasswordV2 error:', err);
       throw err;
     }
   }
@@ -1158,13 +723,13 @@ export class D1Storage implements IStorage {
   async checkUserExistV2(userName: string): Promise<boolean> {
     try {
       const user = await this.db
-        .prepare('SELECT 1 FROM users WHERE username = ?')
+        .prepare('SELECT 1 FROM users WHERE username = $1')
         .bind(userName)
         .first();
 
       return !!user;
     } catch (err) {
-      console.error('D1Storage.checkUserExistV2 error:', err);
+      console.error('PostgresStorage.checkUserExistV2 error:', err);
       return false;
     }
   }
@@ -1172,82 +737,80 @@ export class D1Storage implements IStorage {
   async getUserByOidcSub(oidcSub: string): Promise<string | null> {
     try {
       const user = await this.db
-        .prepare('SELECT username FROM users WHERE oidc_sub = ?')
+        .prepare('SELECT username FROM users WHERE oidc_sub = $1')
         .bind(oidcSub)
         .first();
 
       return user ? (user.username as string) : null;
     } catch (err) {
-      console.error('D1Storage.getUserByOidcSub error:', err);
+      console.error('PostgresStorage.getUserByOidcSub error:', err);
       return null;
     }
   }
 
   async deleteUserV2(userName: string): Promise<void> {
     try {
-      // D1 的外键约束会自动级联删除相关数据
+      // Postgres 的外键约束会自动级联删除相关数据
       await this.db
-        .prepare('DELETE FROM users WHERE username = ?')
+        .prepare('DELETE FROM users WHERE username = $1')
         .bind(userName)
         .run();
 
-      // 清除缓存
-      userInfoCache?.delete(userName);
+      // 清除用户信息缓存
+      const { userInfoCache } = await import('./user-cache');
+      userInfoCache.delete(userName);
     } catch (err) {
-      console.error('D1Storage.deleteUserV2 error:', err);
+      console.error('PostgresStorage.deleteUserV2 error:', err);
       throw err;
     }
   }
 
   async getUsersByTag(tagName: string): Promise<string[]> {
     try {
-      // SQLite 不支持 JSON 查询，需要使用 LIKE
+      // Postgres 支持 JSON 查询
       const result = await this.db
         .prepare(`
           SELECT username FROM users
-          WHERE tags LIKE ?
+          WHERE tags::jsonb ? $1
         `)
-        .bind(`%"${tagName}"%`)
+        .bind(tagName)
         .all();
 
       if (!result.results) return [];
 
       return result.results.map((row: any) => row.username as string);
     } catch (err) {
-      console.error('D1Storage.getUsersByTag error:', err);
+      console.error('PostgresStorage.getUsersByTag error:', err);
       return [];
     }
   }
 
-  // 获取用户密码哈希（用于数据导出）
   async getUserPasswordHash(userName: string): Promise<string | null> {
     try {
       const user = await this.db
-        .prepare('SELECT password_hash FROM users WHERE username = ?')
+        .prepare('SELECT password_hash FROM users WHERE username = $1')
         .bind(userName)
         .first();
 
       return user ? (user.password_hash as string) : null;
     } catch (err) {
-      console.error('D1Storage.getUserPasswordHash error:', err);
+      console.error('PostgresStorage.getUserPasswordHash error:', err);
       return null;
     }
   }
 
-  // 直接设置用户密码哈希（用于数据导入，不进行二次哈希）
   async setUserPasswordHash(userName: string, passwordHash: string): Promise<void> {
     try {
       await this.db
-        .prepare('UPDATE users SET password_hash = ? WHERE username = ?')
+        .prepare('UPDATE users SET password_hash = $1 WHERE username = $2')
         .bind(passwordHash, userName)
         .run();
     } catch (err) {
-      console.error('D1Storage.setUserPasswordHash error:', err);
+      console.error('PostgresStorage.setUserPasswordHash error:', err);
       throw err;
     }
   }
 
-  // 直接创建用户（用于数据导入，密码已经是哈希值）
   async createUserWithHashedPassword(
     userName: string,
     passwordHash: string,
@@ -1266,7 +829,7 @@ export class D1Storage implements IStorage {
             enabled_apis, created_at, playrecord_migrated,
             favorite_migrated, skip_migrated
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 1, 1)
         `)
         .bind(
           userName,
@@ -1280,65 +843,483 @@ export class D1Storage implements IStorage {
         )
         .run();
     } catch (err) {
-      console.error('D1Storage.createUserWithHashedPassword error:', err);
+      console.error('PostgresStorage.createUserWithHashedPassword error:', err);
       throw err;
     }
   }
 
-  async getUserEmail?(userName: string): Promise<string | null> {
+  async getUserEmail(userName: string): Promise<string | null> {
     try {
       const result = await this.db
-        .prepare('SELECT email FROM users WHERE username = ?')
+        .prepare('SELECT email FROM users WHERE username = $1')
         .bind(userName)
         .first();
 
       return result?.email as string | null;
     } catch (err) {
-      console.error('D1Storage.getUserEmail error:', err);
+      console.error('PostgresStorage.getUserEmail error:', err);
       return null;
     }
   }
 
-  async setUserEmail?(userName: string, email: string): Promise<void> {
+  async setUserEmail(userName: string, email: string): Promise<void> {
     try {
       await this.db
-        .prepare('UPDATE users SET email = ? WHERE username = ?')
+        .prepare('UPDATE users SET email = $1 WHERE username = $2')
         .bind(email, userName)
         .run();
 
-      // 清除缓存
-      userInfoCache?.delete(userName);
+      // 清除用户信息缓存
+      const { userInfoCache } = await import('./user-cache');
+      userInfoCache.delete(userName);
     } catch (err) {
-      console.error('D1Storage.setUserEmail error:', err);
+      console.error('PostgresStorage.setUserEmail error:', err);
       throw err;
     }
   }
 
-  async getEmailNotificationPreference?(userName: string): Promise<boolean> {
+  async getEmailNotificationPreference(userName: string): Promise<boolean> {
     try {
       const result = await this.db
-        .prepare('SELECT email_notifications FROM users WHERE username = ?')
+        .prepare('SELECT email_notifications FROM users WHERE username = $1')
         .bind(userName)
         .first();
 
       return result?.email_notifications === 1;
     } catch (err) {
-      console.error('D1Storage.getEmailNotificationPreference error:', err);
+      console.error('PostgresStorage.getEmailNotificationPreference error:', err);
       return true; // 默认开启
     }
   }
 
-  async setEmailNotificationPreference?(userName: string, enabled: boolean): Promise<void> {
+  async setEmailNotificationPreference(userName: string, enabled: boolean): Promise<void> {
     try {
       await this.db
-        .prepare('UPDATE users SET email_notifications = ? WHERE username = ?')
+        .prepare('UPDATE users SET email_notifications = $1 WHERE username = $2')
         .bind(enabled ? 1 : 0, userName)
         .run();
 
-      // 清除缓存
-      userInfoCache?.delete(userName);
+      // 清除用户信息缓存
+      const { userInfoCache } = await import('./user-cache');
+      userInfoCache.delete(userName);
     } catch (err) {
-      console.error('D1Storage.setEmailNotificationPreference error:', err);
+      console.error('PostgresStorage.setEmailNotificationPreference error:', err);
+      throw err;
+    }
+  }
+
+  // ==================== 音乐播放记录 ====================
+
+  async getMusicPlayRecord(userName: string, key: string): Promise<any | null> {
+    try {
+      const result = await this.db
+        .prepare('SELECT * FROM music_play_records WHERE username = $1 AND key = $2')
+        .bind(userName, key)
+        .first();
+
+      if (!result) return null;
+
+      return {
+        platform: result.platform,
+        id: result.song_id,
+        name: result.name,
+        artist: result.artist,
+        album: result.album || undefined,
+        pic: result.pic || undefined,
+        play_time: result.play_time,
+        duration: result.duration,
+        save_time: result.save_time,
+      };
+    } catch (err) {
+      console.error('PostgresStorage.getMusicPlayRecord error:', err);
+      return null;
+    }
+  }
+
+  async setMusicPlayRecord(userName: string, key: string, record: any): Promise<void> {
+    try {
+      await this.db
+        .prepare(`
+          INSERT INTO music_play_records (username, key, platform, song_id, name, artist, album, pic, play_time, duration, save_time)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT(username, key) DO UPDATE SET
+            name = EXCLUDED.name,
+            artist = EXCLUDED.artist,
+            album = EXCLUDED.album,
+            pic = EXCLUDED.pic,
+            play_time = EXCLUDED.play_time,
+            duration = EXCLUDED.duration,
+            save_time = EXCLUDED.save_time
+        `)
+        .bind(
+          userName,
+          key,
+          record.platform,
+          record.id,
+          record.name,
+          record.artist,
+          record.album || null,
+          record.pic || null,
+          record.play_time,
+          record.duration,
+          record.save_time
+        )
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.setMusicPlayRecord error:', err);
+      throw err;
+    }
+  }
+
+  async batchSetMusicPlayRecords(userName: string, records: { key: string; record: any }[]): Promise<void> {
+    if (records.length === 0) return;
+
+    try {
+      // 使用批量插入，Postgres 支持 batch 操作
+      const statements = records.map(({ key, record }) =>
+        this.db
+          .prepare(`
+            INSERT INTO music_play_records (username, key, platform, song_id, name, artist, album, pic, play_time, duration, save_time)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT(username, key) DO UPDATE SET
+              platform = EXCLUDED.platform,
+              song_id = EXCLUDED.song_id,
+              name = EXCLUDED.name,
+              artist = EXCLUDED.artist,
+              album = EXCLUDED.album,
+              pic = EXCLUDED.pic,
+              play_time = EXCLUDED.play_time,
+              duration = EXCLUDED.duration,
+              save_time = EXCLUDED.save_time
+          `)
+          .bind(
+            userName,
+            key,
+            record.platform,
+            record.id,
+            record.name,
+            record.artist,
+            record.album || null,
+            record.pic || null,
+            record.play_time,
+            record.duration,
+            record.save_time
+          )
+      );
+
+      if (this.db.batch) {
+        await this.db.batch(statements);
+      }
+    } catch (err) {
+      console.error('PostgresStorage.batchSetMusicPlayRecords error:', err);
+      throw err;
+    }
+  }
+
+  async getAllMusicPlayRecords(userName: string): Promise<{ [key: string]: any }> {
+    try {
+      const results = await this.db
+        .prepare('SELECT * FROM music_play_records WHERE username = $1 ORDER BY save_time DESC')
+        .bind(userName)
+        .all();
+
+      const records: { [key: string]: any } = {};
+      if (results.results) {
+        for (const row of results.results) {
+          records[row.key as string] = {
+            platform: row.platform,
+            id: row.song_id,
+            name: row.name,
+            artist: row.artist,
+            album: row.album || undefined,
+            pic: row.pic || undefined,
+            play_time: row.play_time,
+            duration: row.duration,
+            save_time: row.save_time,
+          };
+        }
+      }
+      return records;
+    } catch (err) {
+      console.error('PostgresStorage.getAllMusicPlayRecords error:', err);
+      throw err;
+    }
+  }
+
+  async deleteMusicPlayRecord(userName: string, key: string): Promise<void> {
+    try {
+      await this.db
+        .prepare('DELETE FROM music_play_records WHERE username = $1 AND key = $2')
+        .bind(userName, key)
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.deleteMusicPlayRecord error:', err);
+      throw err;
+    }
+  }
+
+  async clearAllMusicPlayRecords(userName: string): Promise<void> {
+    try {
+      await this.db
+        .prepare('DELETE FROM music_play_records WHERE username = $1')
+        .bind(userName)
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.clearAllMusicPlayRecords error:', err);
+      throw err;
+    }
+  }
+
+  // ==================== 音乐歌单相关 ====================
+
+  async createMusicPlaylist(userName: string, playlist: {
+    id: string;
+    name: string;
+    description?: string;
+    cover?: string;
+  }): Promise<void> {
+    try {
+      const now = Date.now();
+      await this.db
+        .prepare(`
+          INSERT INTO music_playlists (id, username, name, description, cover, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `)
+        .bind(
+          playlist.id,
+          userName,
+          playlist.name,
+          playlist.description || null,
+          playlist.cover || null,
+          now,
+          now
+        )
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.createMusicPlaylist error:', err);
+      throw err;
+    }
+  }
+
+  async getMusicPlaylist(playlistId: string): Promise<any | null> {
+    try {
+      const result = await this.db
+        .prepare('SELECT * FROM music_playlists WHERE id = $1')
+        .bind(playlistId)
+        .first();
+
+      if (!result) return null;
+
+      return {
+        id: result.id,
+        username: result.username,
+        name: result.name,
+        description: result.description || undefined,
+        cover: result.cover || undefined,
+        created_at: result.created_at,
+        updated_at: result.updated_at,
+      };
+    } catch (err) {
+      console.error('PostgresStorage.getMusicPlaylist error:', err);
+      return null;
+    }
+  }
+
+  async getUserMusicPlaylists(userName: string): Promise<any[]> {
+    try {
+      const results = await this.db
+        .prepare('SELECT * FROM music_playlists WHERE username = $1 ORDER BY created_at DESC')
+        .bind(userName)
+        .all();
+
+      if (!results.results) return [];
+
+      return results.results.map((row) => ({
+        id: row.id,
+        username: row.username,
+        name: row.name,
+        description: row.description || undefined,
+        cover: row.cover || undefined,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      }));
+    } catch (err) {
+      console.error('PostgresStorage.getUserMusicPlaylists error:', err);
+      return [];
+    }
+  }
+
+  async updateMusicPlaylist(playlistId: string, updates: {
+    name?: string;
+    description?: string;
+    cover?: string;
+  }): Promise<void> {
+    try {
+      const setClauses: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      if (updates.name !== undefined) {
+        setClauses.push(`name = $${paramIndex++}`);
+        values.push(updates.name);
+      }
+      if (updates.description !== undefined) {
+        setClauses.push(`description = $${paramIndex++}`);
+        values.push(updates.description);
+      }
+      if (updates.cover !== undefined) {
+        setClauses.push(`cover = $${paramIndex++}`);
+        values.push(updates.cover);
+      }
+
+      if (setClauses.length === 0) return;
+
+      setClauses.push(`updated_at = $${paramIndex++}`);
+      values.push(Date.now());
+
+      values.push(playlistId);
+
+      await this.db
+        .prepare(`UPDATE music_playlists SET ${setClauses.join(', ')} WHERE id = $${paramIndex}`)
+        .bind(...values)
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.updateMusicPlaylist error:', err);
+      throw err;
+    }
+  }
+
+  async deleteMusicPlaylist(playlistId: string): Promise<void> {
+    try {
+      await this.db
+        .prepare('DELETE FROM music_playlists WHERE id = $1')
+        .bind(playlistId)
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.deleteMusicPlaylist error:', err);
+      throw err;
+    }
+  }
+
+  async addSongToPlaylist(playlistId: string, song: {
+    platform: string;
+    id: string;
+    name: string;
+    artist: string;
+    album?: string;
+    pic?: string;
+    duration: number;
+  }): Promise<void> {
+    try {
+      const now = Date.now();
+
+      // 获取当前最大的 sort_order
+      const maxSortResult = await this.db
+        .prepare('SELECT MAX(sort_order) as max_sort FROM music_playlist_songs WHERE playlist_id = $1')
+        .bind(playlistId)
+        .first();
+
+      const nextSortOrder = (maxSortResult?.max_sort as number || 0) + 1;
+
+      await this.db
+        .prepare(`
+          INSERT INTO music_playlist_songs (playlist_id, platform, song_id, name, artist, album, pic, duration, added_at, sort_order)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          ON CONFLICT(playlist_id, platform, song_id) DO UPDATE SET
+            name = EXCLUDED.name,
+            artist = EXCLUDED.artist,
+            album = EXCLUDED.album,
+            pic = EXCLUDED.pic,
+            duration = EXCLUDED.duration
+        `)
+        .bind(
+          playlistId,
+          song.platform,
+          song.id,
+          song.name,
+          song.artist,
+          song.album || null,
+          song.pic || null,
+          song.duration,
+          now,
+          nextSortOrder
+        )
+        .run();
+
+      // 更新歌单的 updated_at
+      await this.db
+        .prepare('UPDATE music_playlists SET updated_at = $1 WHERE id = $2')
+        .bind(now, playlistId)
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.addSongToPlaylist error:', err);
+      throw err;
+    }
+  }
+
+  async removeSongFromPlaylist(playlistId: string, platform: string, songId: string): Promise<void> {
+    try {
+      await this.db
+        .prepare('DELETE FROM music_playlist_songs WHERE playlist_id = $1 AND platform = $2 AND song_id = $3')
+        .bind(playlistId, platform, songId)
+        .run();
+
+      // 更新歌单的 updated_at
+      await this.db
+        .prepare('UPDATE music_playlists SET updated_at = $1 WHERE id = $2')
+        .bind(Date.now(), playlistId)
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.removeSongFromPlaylist error:', err);
+      throw err;
+    }
+  }
+
+  async getPlaylistSongs(playlistId: string): Promise<any[]> {
+    try {
+      const results = await this.db
+        .prepare('SELECT * FROM music_playlist_songs WHERE playlist_id = $1 ORDER BY sort_order ASC')
+        .bind(playlistId)
+        .all();
+
+      if (!results.results) return [];
+
+      return results.results.map((row) => ({
+        platform: row.platform,
+        id: row.song_id,
+        name: row.name,
+        artist: row.artist,
+        album: row.album || undefined,
+        pic: row.pic || undefined,
+        duration: row.duration,
+        added_at: row.added_at,
+        sort_order: row.sort_order,
+      }));
+    } catch (err) {
+      console.error('PostgresStorage.getPlaylistSongs error:', err);
+      return [];
+    }
+  }
+
+  async updatePlaylistSongOrder(playlistId: string, songOrders: Array<{ platform: string; songId: string; sortOrder: number }>): Promise<void> {
+    try {
+      const statements = songOrders.map(({ platform, songId, sortOrder }) =>
+        this.db
+          .prepare('UPDATE music_playlist_songs SET sort_order = $1 WHERE playlist_id = $2 AND platform = $3 AND song_id = $4')
+          .bind(sortOrder, playlistId, platform, songId)
+      );
+
+      if (this.db.batch) {
+        await this.db.batch(statements);
+      }
+
+      // 更新歌单的 updated_at
+      await this.db
+        .prepare('UPDATE music_playlists SET updated_at = $1 WHERE id = $2')
+        .bind(Date.now(), playlistId)
+        .run();
+    } catch (err) {
+      console.error('PostgresStorage.updatePlaylistSongOrder error:', err);
       throw err;
     }
   }
@@ -1348,14 +1329,14 @@ export class D1Storage implements IStorage {
   async getSearchHistory(userName: string): Promise<string[]> {
     try {
       const results = await this.db
-        .prepare('SELECT keyword FROM search_history WHERE username = ? ORDER BY timestamp DESC LIMIT 20')
+        .prepare('SELECT keyword FROM search_history WHERE username = $1 ORDER BY timestamp DESC LIMIT 20')
         .bind(userName)
         .all();
 
       if (!results.results) return [];
       return results.results.map((row) => row.keyword as string);
     } catch (err) {
-      console.error('D1Storage.getSearchHistory error:', err);
+      console.error('PostgresStorage.getSearchHistory error:', err);
       return [];
     }
   }
@@ -1368,15 +1349,15 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           INSERT INTO search_history (username, keyword, timestamp)
-          VALUES (?, ?, ?)
-          ON CONFLICT(username, keyword) DO UPDATE SET timestamp = excluded.timestamp
+          VALUES ($1, $2, $3)
+          ON CONFLICT (username, keyword) DO UPDATE SET timestamp = EXCLUDED.timestamp
         `)
         .bind(userName, keyword, timestamp)
         .run();
 
       // 保持最多 20 条记录
       const countResult = await this.db
-        .prepare('SELECT COUNT(*) as count FROM search_history WHERE username = ?')
+        .prepare('SELECT COUNT(*) as count FROM search_history WHERE username = $1')
         .bind(userName)
         .first();
 
@@ -1385,19 +1366,19 @@ export class D1Storage implements IStorage {
         await this.db
           .prepare(`
             DELETE FROM search_history
-            WHERE username = ?
+            WHERE username = $1
             AND id NOT IN (
               SELECT id FROM search_history
-              WHERE username = ?
+              WHERE username = $1
               ORDER BY timestamp DESC
               LIMIT 20
             )
           `)
-          .bind(userName, userName)
+          .bind(userName)
           .run();
       }
     } catch (err) {
-      console.error('D1Storage.addSearchHistory error:', err);
+      console.error('PostgresStorage.addSearchHistory error:', err);
       throw err;
     }
   }
@@ -1406,17 +1387,17 @@ export class D1Storage implements IStorage {
     try {
       if (keyword) {
         await this.db
-          .prepare('DELETE FROM search_history WHERE username = ? AND keyword = ?')
+          .prepare('DELETE FROM search_history WHERE username = $1 AND keyword = $2')
           .bind(userName, keyword)
           .run();
       } else {
         await this.db
-          .prepare('DELETE FROM search_history WHERE username = ?')
+          .prepare('DELETE FROM search_history WHERE username = $1')
           .bind(userName)
           .run();
       }
     } catch (err) {
-      console.error('D1Storage.deleteSearchHistory error:', err);
+      console.error('PostgresStorage.deleteSearchHistory error:', err);
       throw err;
     }
   }
@@ -1427,7 +1408,7 @@ export class D1Storage implements IStorage {
     try {
       const key = `${source}+${id}`;
       const result = await this.db
-        .prepare('SELECT * FROM skip_configs WHERE username = ? AND key = ?')
+        .prepare('SELECT * FROM skip_configs WHERE username = $1 AND key = $2')
         .bind(userName, key)
         .first();
 
@@ -1438,7 +1419,7 @@ export class D1Storage implements IStorage {
         outro_time: result.outro_time as number,
       };
     } catch (err) {
-      console.error('D1Storage.getSkipConfig error:', err);
+      console.error('PostgresStorage.getSkipConfig error:', err);
       return null;
     }
   }
@@ -1449,16 +1430,16 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           INSERT INTO skip_configs (username, key, enable, intro_time, outro_time)
-          VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(username, key) DO UPDATE SET
-            enable = excluded.enable,
-            intro_time = excluded.intro_time,
-            outro_time = excluded.outro_time
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (username, key) DO UPDATE SET
+            enable = EXCLUDED.enable,
+            intro_time = EXCLUDED.intro_time,
+            outro_time = EXCLUDED.outro_time
         `)
         .bind(userName, key, config.enable ? 1 : 0, config.intro_time, config.outro_time)
         .run();
     } catch (err) {
-      console.error('D1Storage.setSkipConfig error:', err);
+      console.error('PostgresStorage.setSkipConfig error:', err);
       throw err;
     }
   }
@@ -1467,11 +1448,11 @@ export class D1Storage implements IStorage {
     try {
       const key = `${source}+${id}`;
       await this.db
-        .prepare('DELETE FROM skip_configs WHERE username = ? AND key = ?')
+        .prepare('DELETE FROM skip_configs WHERE username = $1 AND key = $2')
         .bind(userName, key)
         .run();
     } catch (err) {
-      console.error('D1Storage.deleteSkipConfig error:', err);
+      console.error('PostgresStorage.deleteSkipConfig error:', err);
       throw err;
     }
   }
@@ -1479,7 +1460,7 @@ export class D1Storage implements IStorage {
   async getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }> {
     try {
       const results = await this.db
-        .prepare('SELECT * FROM skip_configs WHERE username = ?')
+        .prepare('SELECT * FROM skip_configs WHERE username = $1')
         .bind(userName)
         .all();
 
@@ -1495,7 +1476,7 @@ export class D1Storage implements IStorage {
       }
       return configs;
     } catch (err) {
-      console.error('D1Storage.getAllSkipConfigs error:', err);
+      console.error('PostgresStorage.getAllSkipConfigs error:', err);
       return {};
     }
   }
@@ -1503,14 +1484,11 @@ export class D1Storage implements IStorage {
   async migrateSkipConfigs(userName: string): Promise<void> {
     try {
       await this.db
-        .prepare('UPDATE users SET skip_migrated = 1 WHERE username = ?')
+        .prepare('UPDATE users SET skip_migrated = 1 WHERE username = $1')
         .bind(userName)
         .run();
-
-      // 清除缓存
-      userInfoCache?.delete(userName);
     } catch (err) {
-      console.error('D1Storage.migrateSkipConfigs error:', err);
+      console.error('PostgresStorage.migrateSkipConfigs error:', err);
     }
   }
 
@@ -1519,14 +1497,14 @@ export class D1Storage implements IStorage {
   async getDanmakuFilterConfig(userName: string): Promise<DanmakuFilterConfig | null> {
     try {
       const result = await this.db
-        .prepare('SELECT rules FROM danmaku_filter_configs WHERE username = ?')
+        .prepare('SELECT rules FROM danmaku_filter_configs WHERE username = $1')
         .bind(userName)
         .first();
 
       if (!result) return null;
       return JSON.parse(result.rules as string);
     } catch (err) {
-      console.error('D1Storage.getDanmakuFilterConfig error:', err);
+      console.error('PostgresStorage.getDanmakuFilterConfig error:', err);
       return null;
     }
   }
@@ -1536,13 +1514,13 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           INSERT INTO danmaku_filter_configs (username, rules)
-          VALUES (?, ?)
-          ON CONFLICT(username) DO UPDATE SET rules = excluded.rules
+          VALUES ($1, $2)
+          ON CONFLICT (username) DO UPDATE SET rules = EXCLUDED.rules
         `)
         .bind(userName, JSON.stringify(config))
         .run();
     } catch (err) {
-      console.error('D1Storage.setDanmakuFilterConfig error:', err);
+      console.error('PostgresStorage.setDanmakuFilterConfig error:', err);
       throw err;
     }
   }
@@ -1550,11 +1528,11 @@ export class D1Storage implements IStorage {
   async deleteDanmakuFilterConfig(userName: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM danmaku_filter_configs WHERE username = ?')
+        .prepare('DELETE FROM danmaku_filter_configs WHERE username = $1')
         .bind(userName)
         .run();
     } catch (err) {
-      console.error('D1Storage.deleteDanmakuFilterConfig error:', err);
+      console.error('PostgresStorage.deleteDanmakuFilterConfig error:', err);
       throw err;
     }
   }
@@ -1564,7 +1542,7 @@ export class D1Storage implements IStorage {
   async getNotifications(userName: string): Promise<Notification[]> {
     try {
       const results = await this.db
-        .prepare('SELECT * FROM notifications WHERE username = ? ORDER BY timestamp DESC')
+        .prepare('SELECT * FROM notifications WHERE username = $1 ORDER BY timestamp DESC')
         .bind(userName)
         .all();
 
@@ -1579,7 +1557,7 @@ export class D1Storage implements IStorage {
         metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
       }));
     } catch (err) {
-      console.error('D1Storage.getNotifications error:', err);
+      console.error('PostgresStorage.getNotifications error:', err);
       return [];
     }
   }
@@ -1589,7 +1567,7 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           INSERT INTO notifications (id, username, type, title, message, timestamp, read, metadata)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `)
         .bind(
           notification.id,
@@ -1603,7 +1581,7 @@ export class D1Storage implements IStorage {
         )
         .run();
     } catch (err) {
-      console.error('D1Storage.addNotification error:', err);
+      console.error('PostgresStorage.addNotification error:', err);
       throw err;
     }
   }
@@ -1611,11 +1589,11 @@ export class D1Storage implements IStorage {
   async markNotificationAsRead(userName: string, notificationId: string): Promise<void> {
     try {
       await this.db
-        .prepare('UPDATE notifications SET read = 1 WHERE username = ? AND id = ?')
+        .prepare('UPDATE notifications SET read = 1 WHERE username = $1 AND id = $2')
         .bind(userName, notificationId)
         .run();
     } catch (err) {
-      console.error('D1Storage.markNotificationAsRead error:', err);
+      console.error('PostgresStorage.markNotificationAsRead error:', err);
       throw err;
     }
   }
@@ -1623,11 +1601,11 @@ export class D1Storage implements IStorage {
   async deleteNotification(userName: string, notificationId: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM notifications WHERE username = ? AND id = ?')
+        .prepare('DELETE FROM notifications WHERE username = $1 AND id = $2')
         .bind(userName, notificationId)
         .run();
     } catch (err) {
-      console.error('D1Storage.deleteNotification error:', err);
+      console.error('PostgresStorage.deleteNotification error:', err);
       throw err;
     }
   }
@@ -1635,11 +1613,11 @@ export class D1Storage implements IStorage {
   async clearAllNotifications(userName: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM notifications WHERE username = ?')
+        .prepare('DELETE FROM notifications WHERE username = $1')
         .bind(userName)
         .run();
     } catch (err) {
-      console.error('D1Storage.clearAllNotifications error:', err);
+      console.error('PostgresStorage.clearAllNotifications error:', err);
       throw err;
     }
   }
@@ -1647,13 +1625,13 @@ export class D1Storage implements IStorage {
   async getUnreadNotificationCount(userName: string): Promise<number> {
     try {
       const result = await this.db
-        .prepare('SELECT COUNT(*) as count FROM notifications WHERE username = ? AND read = 0')
+        .prepare('SELECT COUNT(*) as count FROM notifications WHERE username = $1 AND read = 0')
         .bind(userName)
         .first();
 
       return (result?.count as number) || 0;
     } catch (err) {
-      console.error('D1Storage.getUnreadNotificationCount error:', err);
+      console.error('PostgresStorage.getUnreadNotificationCount error:', err);
       return 0;
     }
   }
@@ -1669,7 +1647,7 @@ export class D1Storage implements IStorage {
       if (!results.results) return [];
       return results.results.map((row) => this.rowToMovieRequest(row));
     } catch (err) {
-      console.error('D1Storage.getAllMovieRequests error:', err);
+      console.error('PostgresStorage.getAllMovieRequests error:', err);
       return [];
     }
   }
@@ -1677,14 +1655,14 @@ export class D1Storage implements IStorage {
   async getMovieRequest(requestId: string): Promise<MovieRequest | null> {
     try {
       const result = await this.db
-        .prepare('SELECT * FROM movie_requests WHERE id = ?')
+        .prepare('SELECT * FROM movie_requests WHERE id = $1')
         .bind(requestId)
         .first();
 
       if (!result) return null;
       return this.rowToMovieRequest(result);
     } catch (err) {
-      console.error('D1Storage.getMovieRequest error:', err);
+      console.error('PostgresStorage.getMovieRequest error:', err);
       return null;
     }
   }
@@ -1698,7 +1676,7 @@ export class D1Storage implements IStorage {
             requested_by, request_count, status, created_at, updated_at,
             fulfilled_at, fulfilled_source, fulfilled_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         `)
         .bind(
           request.id,
@@ -1720,7 +1698,7 @@ export class D1Storage implements IStorage {
         )
         .run();
     } catch (err) {
-      console.error('D1Storage.createMovieRequest error:', err);
+      console.error('PostgresStorage.createMovieRequest error:', err);
       throw err;
     }
   }
@@ -1729,43 +1707,44 @@ export class D1Storage implements IStorage {
     try {
       const fields: string[] = [];
       const values: any[] = [];
+      let paramIndex = 1;
 
       if (updates.requestedBy !== undefined) {
-        fields.push('requested_by = ?');
+        fields.push(`requested_by = $${paramIndex++}`);
         values.push(JSON.stringify(updates.requestedBy));
       }
       if (updates.requestCount !== undefined) {
-        fields.push('request_count = ?');
+        fields.push(`request_count = $${paramIndex++}`);
         values.push(updates.requestCount);
       }
       if (updates.status !== undefined) {
-        fields.push('status = ?');
+        fields.push(`status = $${paramIndex++}`);
         values.push(updates.status);
       }
       if (updates.fulfilledAt !== undefined) {
-        fields.push('fulfilled_at = ?');
+        fields.push(`fulfilled_at = $${paramIndex++}`);
         values.push(updates.fulfilledAt);
       }
       if (updates.fulfilledSource !== undefined) {
-        fields.push('fulfilled_source = ?');
+        fields.push(`fulfilled_source = $${paramIndex++}`);
         values.push(updates.fulfilledSource);
       }
       if (updates.fulfilledId !== undefined) {
-        fields.push('fulfilled_id = ?');
+        fields.push(`fulfilled_id = $${paramIndex++}`);
         values.push(updates.fulfilledId);
       }
 
-      fields.push('updated_at = ?');
+      fields.push(`updated_at = $${paramIndex++}`);
       values.push(Date.now());
 
       values.push(requestId);
 
       await this.db
-        .prepare(`UPDATE movie_requests SET ${fields.join(', ')} WHERE id = ?`)
+        .prepare(`UPDATE movie_requests SET ${fields.join(', ')} WHERE id = $${paramIndex}`)
         .bind(...values)
         .run();
     } catch (err) {
-      console.error('D1Storage.updateMovieRequest error:', err);
+      console.error('PostgresStorage.updateMovieRequest error:', err);
       throw err;
     }
   }
@@ -1773,11 +1752,11 @@ export class D1Storage implements IStorage {
   async deleteMovieRequest(requestId: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM movie_requests WHERE id = ?')
+        .prepare('DELETE FROM movie_requests WHERE id = $1')
         .bind(requestId)
         .run();
     } catch (err) {
-      console.error('D1Storage.deleteMovieRequest error:', err);
+      console.error('PostgresStorage.deleteMovieRequest error:', err);
       throw err;
     }
   }
@@ -1785,14 +1764,14 @@ export class D1Storage implements IStorage {
   async getUserMovieRequests(userName: string): Promise<string[]> {
     try {
       const results = await this.db
-        .prepare('SELECT request_id FROM user_movie_requests WHERE username = ?')
+        .prepare('SELECT request_id FROM user_movie_requests WHERE username = $1')
         .bind(userName)
         .all();
 
       if (!results.results) return [];
       return results.results.map((row) => row.request_id as string);
     } catch (err) {
-      console.error('D1Storage.getUserMovieRequests error:', err);
+      console.error('PostgresStorage.getUserMovieRequests error:', err);
       return [];
     }
   }
@@ -1800,11 +1779,11 @@ export class D1Storage implements IStorage {
   async addUserMovieRequest(userName: string, requestId: string): Promise<void> {
     try {
       await this.db
-        .prepare('INSERT OR IGNORE INTO user_movie_requests (username, request_id) VALUES (?, ?)')
+        .prepare('INSERT INTO user_movie_requests (username, request_id) VALUES ($1, $2) ON CONFLICT (username, request_id) DO NOTHING')
         .bind(userName, requestId)
         .run();
     } catch (err) {
-      console.error('D1Storage.addUserMovieRequest error:', err);
+      console.error('PostgresStorage.addUserMovieRequest error:', err);
       throw err;
     }
   }
@@ -1812,11 +1791,11 @@ export class D1Storage implements IStorage {
   async removeUserMovieRequest(userName: string, requestId: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM user_movie_requests WHERE username = ? AND request_id = ?')
+        .prepare('DELETE FROM user_movie_requests WHERE username = $1 AND request_id = $2')
         .bind(userName, requestId)
         .run();
     } catch (err) {
-      console.error('D1Storage.removeUserMovieRequest error:', err);
+      console.error('PostgresStorage.removeUserMovieRequest error:', err);
       throw err;
     }
   }
@@ -1853,7 +1832,7 @@ export class D1Storage implements IStorage {
       if (!result) return null;
       return JSON.parse(result.config as string);
     } catch (err) {
-      console.error('D1Storage.getAdminConfig error:', err);
+      console.error('PostgresStorage.getAdminConfig error:', err);
       return null;
     }
   }
@@ -1863,13 +1842,13 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           INSERT INTO admin_config (id, config, updated_at)
-          VALUES (1, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at
+          VALUES (1, $1, $2)
+          ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config, updated_at = EXCLUDED.updated_at
         `)
         .bind(JSON.stringify(config), Date.now())
         .run();
     } catch (err) {
-      console.error('D1Storage.setAdminConfig error:', err);
+      console.error('PostgresStorage.setAdminConfig error:', err);
       throw err;
     }
   }
@@ -1894,7 +1873,7 @@ export class D1Storage implements IStorage {
         await this.db.prepare(`DELETE FROM ${table}`).run();
       }
     } catch (err) {
-      console.error('D1Storage.clearAllData error:', err);
+      console.error('PostgresStorage.clearAllData error:', err);
       throw err;
     }
   }
@@ -1902,13 +1881,13 @@ export class D1Storage implements IStorage {
   async getGlobalValue(key: string): Promise<string | null> {
     try {
       const result = await this.db
-        .prepare('SELECT value FROM global_config WHERE key = ?')
+        .prepare('SELECT value FROM global_config WHERE key = $1')
         .bind(key)
         .first();
 
       return result ? (result.value as string) : null;
     } catch (err) {
-      console.error('D1Storage.getGlobalValue error:', err);
+      console.error('PostgresStorage.getGlobalValue error:', err);
       return null;
     }
   }
@@ -1918,13 +1897,13 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           INSERT INTO global_config (key, value, updated_at)
-          VALUES (?, ?, ?)
-          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+          VALUES ($1, $2, $3)
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
         `)
         .bind(key, value, Date.now())
         .run();
     } catch (err) {
-      console.error('D1Storage.setGlobalValue error:', err);
+      console.error('PostgresStorage.setGlobalValue error:', err);
       throw err;
     }
   }
@@ -1932,11 +1911,11 @@ export class D1Storage implements IStorage {
   async deleteGlobalValue(key: string): Promise<void> {
     try {
       await this.db
-        .prepare('DELETE FROM global_config WHERE key = ?')
+        .prepare('DELETE FROM global_config WHERE key = $1')
         .bind(key)
         .run();
     } catch (err) {
-      console.error('D1Storage.deleteGlobalValue error:', err);
+      console.error('PostgresStorage.deleteGlobalValue error:', err);
       throw err;
     }
   }
@@ -1944,13 +1923,13 @@ export class D1Storage implements IStorage {
   async getLastFavoriteCheckTime(userName: string): Promise<number> {
     try {
       const result = await this.db
-        .prepare('SELECT last_check_time FROM favorite_check_times WHERE username = ?')
+        .prepare('SELECT last_check_time FROM favorite_check_times WHERE username = $1')
         .bind(userName)
         .first();
 
       return (result?.last_check_time as number) || 0;
     } catch (err) {
-      console.error('D1Storage.getLastFavoriteCheckTime error:', err);
+      console.error('PostgresStorage.getLastFavoriteCheckTime error:', err);
       return 0;
     }
   }
@@ -1960,13 +1939,13 @@ export class D1Storage implements IStorage {
       await this.db
         .prepare(`
           INSERT INTO favorite_check_times (username, last_check_time)
-          VALUES (?, ?)
-          ON CONFLICT(username) DO UPDATE SET last_check_time = excluded.last_check_time
+          VALUES ($1, $2)
+          ON CONFLICT (username) DO UPDATE SET last_check_time = EXCLUDED.last_check_time
         `)
         .bind(userName, timestamp)
         .run();
     } catch (err) {
-      console.error('D1Storage.setLastFavoriteCheckTime error:', err);
+      console.error('PostgresStorage.setLastFavoriteCheckTime error:', err);
       throw err;
     }
   }
@@ -1974,11 +1953,11 @@ export class D1Storage implements IStorage {
   async updateLastMovieRequestTime(userName: string, timestamp: number): Promise<void> {
     try {
       await this.db
-        .prepare('UPDATE users SET last_movie_request_time = ? WHERE username = ?')
+        .prepare('UPDATE users SET last_movie_request_time = $1 WHERE username = $2')
         .bind(timestamp, userName)
         .run();
     } catch (err) {
-      console.error('D1Storage.updateLastMovieRequestTime error:', err);
+      console.error('PostgresStorage.updateLastMovieRequestTime error:', err);
       throw err;
     }
   }
@@ -1991,50 +1970,35 @@ export class D1Storage implements IStorage {
  * 使用 global_config 表模拟 Redis Hash 操作
  * key 格式：user_tokens:{username}:{tokenId}
  */
-class RedisHashAdapter {
+class PostgresRedisHashAdapter {
   constructor(private db: DatabaseAdapter) {}
 
-  /**
-   * 设置 Hash 字段
-   * Redis: HSET key field value
-   * D1: INSERT/UPDATE global_config
-   */
   async hSet(hashKey: string, field: string, value: string): Promise<void> {
     const key = `${hashKey}:${field}`;
     await this.db
       .prepare(`
         INSERT INTO global_config (key, value, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        VALUES ($1, $2, $3)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
       `)
       .bind(key, value, Date.now())
       .run();
   }
 
-  /**
-   * 获取 Hash 字段
-   * Redis: HGET key field
-   * D1: SELECT from global_config
-   */
   async hGet(hashKey: string, field: string): Promise<string | null> {
     const key = `${hashKey}:${field}`;
     const result = await this.db
-      .prepare('SELECT value FROM global_config WHERE key = ?')
+      .prepare('SELECT value FROM global_config WHERE key = $1')
       .bind(key)
       .first();
 
     return result ? (result.value as string) : null;
   }
 
-  /**
-   * 获取 Hash 所有字段
-   * Redis: HGETALL key
-   * D1: SELECT all matching keys
-   */
   async hGetAll(hashKey: string): Promise<Record<string, string>> {
     const prefix = `${hashKey}:`;
     const results = await this.db
-      .prepare('SELECT key, value FROM global_config WHERE key LIKE ?')
+      .prepare('SELECT key, value FROM global_config WHERE key LIKE $1')
       .bind(`${prefix}%`)
       .all();
 
@@ -2051,28 +2015,18 @@ class RedisHashAdapter {
     return hash;
   }
 
-  /**
-   * 删除 Hash 字段
-   * Redis: HDEL key field
-   * D1: DELETE from global_config
-   */
   async hDel(hashKey: string, field: string): Promise<void> {
     const key = `${hashKey}:${field}`;
     await this.db
-      .prepare('DELETE FROM global_config WHERE key = ?')
+      .prepare('DELETE FROM global_config WHERE key = $1')
       .bind(key)
       .run();
   }
 
-  /**
-   * 删除整个 Hash
-   * Redis: DEL key
-   * D1: DELETE all matching keys
-   */
   async del(hashKey: string): Promise<void> {
     const prefix = `${hashKey}:`;
     await this.db
-      .prepare('DELETE FROM global_config WHERE key LIKE ?')
+      .prepare('DELETE FROM global_config WHERE key LIKE $1')
       .bind(`${prefix}%`)
       .run();
   }

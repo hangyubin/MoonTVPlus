@@ -114,6 +114,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   const [aiDefaultMessageWithVideo, setAiDefaultMessageWithVideo] = useState('');
   const [showDetailPanel, setShowDetailPanel] = useState(false);
   const [showImageViewer, setShowImageViewer] = useState(false);
+  const [showUpcomingInfo, setShowUpcomingInfo] = useState(false); // 控制即将上映倒计时的显示
 
   // 检查AI功能是否启用
   useEffect(() => {
@@ -276,8 +277,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   );
 
   const handleClick = useCallback(() => {
-    // 即将上映的电影不跳转
+    // 即将上映的电影：单击显示上映倒计时提示，不跳转
     if (isUpcoming) {
+      setShowUpcomingInfo(true);
+      // 2秒后自动隐藏
+      setTimeout(() => {
+        setShowUpcomingInfo(false);
+      }, 2000);
       return;
     }
 
@@ -382,11 +388,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
 
   // 长按操作
   const handleLongPress = useCallback(() => {
-    // 即将上映的电影不显示操作菜单
-    if (isUpcoming) {
-      return;
-    }
-
     if (!showMobileActions) { // 防止重复触发
       // 立即显示菜单，避免等待数据加载导致动画卡顿
       setShowMobileActions(true);
@@ -396,7 +397,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
         checkSearchFavoriteStatus();
       }
     }
-  }, [isUpcoming, showMobileActions, from, isAggregate, actualSource, actualId, searchFavorited, checkSearchFavoriteStatus]);
+  }, [showMobileActions, from, isAggregate, actualSource, actualId, searchFavorited, checkSearchFavoriteStatus]);
 
   // 长按手势hook
   const longPressProps = useLongPress({
@@ -664,7 +665,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   return (
     <>
       <div
-        className={`group relative w-full rounded-lg bg-transparent transition-all duration-300 ease-in-out hover:scale-[1.05] hover:z-[500] ${isUpcoming ? 'cursor-default' : 'cursor-pointer'}`}
+        className={`group relative w-full rounded-lg bg-transparent transition-all duration-300 ease-in-out hover:scale-[1.05] hover:z-[500] ${isUpcoming ? 'cursor-default' : 'cursor-pointer'} ${
+          showUpcomingInfo ? 'scale-[1.05] z-[500]' : ''
+        }`}
         onClick={handleClick}
         {...longPressProps}
         style={{
@@ -681,11 +684,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
           // 阻止默认右键菜单
           e.preventDefault();
           e.stopPropagation();
-
-          // 即将上映的电影不显示操作菜单
-          if (isUpcoming) {
-            return false;
-          }
 
           // 右键弹出操作菜单
           setShowMobileActions(true);
@@ -787,7 +785,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
           {isUpcoming && daysUntilRelease !== null ? (
             <div
               data-button="true"
-              className='absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-300 ease-in-out delay-75 group-hover:opacity-100'
+              className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ease-in-out ${
+                showUpcomingInfo ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
+              }`}
               style={{
                 WebkitUserSelect: 'none',
                 userSelect: 'none',

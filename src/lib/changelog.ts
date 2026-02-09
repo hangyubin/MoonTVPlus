@@ -11,6 +11,19 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
 	{
+    version: '212.1.0',
+    date: '2026-02-08',
+	added: [
+		"新增 Vercel Postgres 数据库支持"
+    ],
+    changed: [
+		"自动创建站长账号，避免外键约束导致无法操作关联表",
+		"即将上映恢复长按菜单，上映天数改为点击显示"
+    ],
+    fixed: [
+	]
+	},
+	{
     version: '212.0.0',
     date: '2026-02-07',
 	added: [
