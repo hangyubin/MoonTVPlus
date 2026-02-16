@@ -42,8 +42,8 @@ interface DetailData {
   };
   intro?: string;
   genres?: string[];
-  directors?: Array<{ name: string }>;
-  actors?: Array<{ name: string }>;
+  directors?: Array<{ name: string; profile_path?: string }>;
+  actors?: Array<{ name: string; character?: string; profile_path?: string }>;
   countries?: string[];
   languages?: string[];
   duration?: string;
@@ -108,6 +108,11 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const episodesScrollRef = React.useRef<HTMLDivElement>(null);
+  const actorsScrollRef = React.useRef<HTMLDivElement>(null);
+  const [isActorsDragging, setIsActorsDragging] = useState(false);
+  const [isActorsMouseDown, setIsActorsMouseDown] = useState(false);
+  const [actorsStartX, setActorsStartX] = useState(0);
+  const [actorsScrollLeft, setActorsScrollLeft] = useState(0);
 
   // 图片点击处理
   const handleImageClick = (imageUrl: string) => {
@@ -646,6 +651,51 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
     fetchSeasonData();
   }, [detailData?.tmdbId, detailData?.mediaType, detailData?.seasonNumber, seasonsLoaded]);
 
+  // 异步获取演职人员信息（仅TMDB）
+  useEffect(() => {
+    if (!detailData?.tmdbId || !detailData?.mediaType || currentSource !== 'tmdb') {
+      return;
+    }
+
+    // 如果已经有演员信息，不重复获取
+    if (detailData.actors && detailData.actors.length > 0) {
+      return;
+    }
+
+    const fetchCredits = async () => {
+      try {
+        const creditsResponse = await fetch(
+          `/api/tmdb/credits?id=${detailData.tmdbId}&type=${detailData.mediaType}`
+        );
+        if (!creditsResponse.ok) return;
+        const creditsData = await creditsResponse.json();
+
+        // 更新演员和导演信息
+        setDetailData(prev => prev ? {
+          ...prev,
+          directors: creditsData.crew
+            ?.filter((person: any) => person.job === 'Director')
+            .slice(0, 5)
+            .map((person: any) => ({
+              name: person.name,
+              profile_path: person.profile_path,
+            })) || prev.directors,
+          actors: creditsData.cast
+            ?.slice(0, 15)
+            .map((person: any) => ({
+              name: person.name,
+              character: person.character,
+              profile_path: person.profile_path,
+            })) || prev.actors,
+        } : null);
+      } catch (err) {
+        console.error('获取演职人员信息失败:', err);
+      }
+    };
+
+    fetchCredits();
+  }, [detailData?.tmdbId, detailData?.mediaType, currentSource, detailData?.actors]);
+
   // 切换季度时获取集数
   const handleSeasonChange = async (seasonNumber: number) => {
     if (!detailData?.tmdbId || selectedSeason === seasonNumber) return;
@@ -730,6 +780,54 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       if (episodesScrollRef.current) {
         episodesScrollRef.current.style.cursor = 'grab';
         episodesScrollRef.current.style.userSelect = 'auto';
+      }
+    }
+  };
+
+  // 演员列表拖动滚动处理函数
+  const handleActorsMouseDown = (e: React.MouseEvent) => {
+    if (!actorsScrollRef.current) return;
+    setIsActorsMouseDown(true);
+    setActorsStartX(e.pageX - actorsScrollRef.current.offsetLeft);
+    setActorsScrollLeft(actorsScrollRef.current.scrollLeft);
+  };
+
+  const handleActorsMouseMove = (e: React.MouseEvent) => {
+    if (!isActorsMouseDown || !actorsScrollRef.current) return;
+
+    const x = e.pageX - actorsScrollRef.current.offsetLeft;
+    const distance = Math.abs(x - actorsStartX);
+
+    // 只有移动超过5px才进入拖动模式
+    if (distance > 5 && !isActorsDragging) {
+      setIsActorsDragging(true);
+      actorsScrollRef.current.style.cursor = 'grabbing';
+      actorsScrollRef.current.style.userSelect = 'none';
+    }
+
+    if (isActorsDragging) {
+      e.preventDefault();
+      const walk = (x - actorsStartX) * 2; // 滚动速度倍数
+      actorsScrollRef.current.scrollLeft = actorsScrollLeft - walk;
+    }
+  };
+
+  const handleActorsMouseUp = () => {
+    setIsActorsMouseDown(false);
+    setIsActorsDragging(false);
+    if (actorsScrollRef.current) {
+      actorsScrollRef.current.style.cursor = 'grab';
+      actorsScrollRef.current.style.userSelect = 'auto';
+    }
+  };
+
+  const handleActorsMouseLeave = () => {
+    if (isActorsMouseDown || isActorsDragging) {
+      setIsActorsMouseDown(false);
+      setIsActorsDragging(false);
+      if (actorsScrollRef.current) {
+        actorsScrollRef.current.style.cursor = 'grab';
+        actorsScrollRef.current.style.userSelect = 'auto';
       }
     }
   };
@@ -929,9 +1027,67 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                     <Users size={16} />
                     演员
                   </h4>
-                  <p className="text-gray-700 dark:text-gray-300">
-                    {detailData.actors.slice(0, 10).map((a) => a.name).join(', ')}
-                  </p>
+                  {currentSource === 'tmdb' ? (
+                    <div
+                      ref={actorsScrollRef}
+                      onMouseDown={handleActorsMouseDown}
+                      onMouseMove={handleActorsMouseMove}
+                      onMouseUp={handleActorsMouseUp}
+                      onMouseLeave={handleActorsMouseLeave}
+                      className="overflow-x-auto -mx-6 px-6 cursor-grab active:cursor-grabbing"
+                      style={{
+                        scrollbarWidth: 'thin',
+                        scrollBehavior: isActorsDragging ? 'auto' : 'smooth'
+                      }}
+                    >
+                      <div className="flex gap-4 pb-2">
+                        {detailData.actors.map((actor, index) => (
+                          <div
+                            key={index}
+                            className="flex flex-col items-center flex-shrink-0"
+                            style={{ pointerEvents: isActorsDragging ? 'none' : 'auto' }}
+                          >
+                            {actor.profile_path ? (
+                              <div
+                                className="relative w-20 h-20 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 mb-2 cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => handleImageClick(processImageUrl(getTMDBImageUrl(actor.profile_path, 'w185')))}
+                              >
+                                <Image
+                                  src={processImageUrl(getTMDBImageUrl(actor.profile_path, 'w185'))}
+                                  alt={actor.name}
+                                  fill
+                                  className="object-cover"
+                                  draggable={false}
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-20 h-20 rounded-full bg-gray-200 dark:bg-gray-700 mb-2 flex items-center justify-center">
+                                <Users size={28} className="text-gray-400" />
+                              </div>
+                            )}
+                            <a
+                              href={`https://baike.baidu.com/item/${encodeURIComponent(actor.name)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-medium text-gray-900 dark:text-gray-100 text-center w-20 line-clamp-2 hover:text-green-600 dark:hover:text-green-400 transition-colors cursor-pointer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {actor.name}
+                            </a>
+                            {actor.character && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 text-center w-20 line-clamp-2">
+                                {actor.character}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-gray-700 dark:text-gray-300">
+                      {detailData.actors.slice(0, 10).map((a) => a.name).join(', ')}
+                    </p>
+                  )}
                 </div>
               )}
 
