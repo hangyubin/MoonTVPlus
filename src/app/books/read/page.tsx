@@ -15,6 +15,13 @@ import {
   touchCachedBookFile,
 } from '@/lib/book-cache.client';
 import { cacheBookDetail, getBookRouteCache } from '@/lib/book-route-cache.client';
+import {
+  buildBookTtsCacheKey,
+  enforceBookTtsCacheLimit,
+  getCachedBookTtsChunk,
+  putCachedBookTtsChunk,
+  touchCachedBookTtsChunk,
+} from '@/lib/book-tts-cache.client';
 import { getBookTtsProgress, saveBookTtsProgress } from '@/lib/book-tts-progress.client';
 
 declare global {
@@ -273,6 +280,13 @@ function formatBytes(size: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatDurationTime(value: number) {
+  const totalSeconds = Math.max(0, Math.floor(value || 0));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 function sanitizeTtsText(text: string): string {
   return text
     .replace(/\u00a0/g, ' ')
@@ -436,6 +450,7 @@ export default function BookReadPage() {
   const ttsSeekingRef = useRef(false);
   const ttsPrefetchedFromChunkRef = useRef<number | null>(null);
   const ttsPrefetchFnRef = useRef<(fromIndex: number) => void>(() => undefined);
+  const ttsResumeTimeRef = useRef<number>(0);
 
   useEffect(() => {
     setSettings(loadReaderSettings());
@@ -715,6 +730,7 @@ export default function BookReadPage() {
       chapterTitle: ttsCurrentChapterTitleRef.current || currentChapter,
       chunkIndex: currentIndex,
       charOffset: chunk.start,
+      currentTimeSec: audioRef.current?.currentTime || 0,
       voice: ttsSettingsRef.current.voice,
       rate: ttsSettingsRef.current.rate,
       pitch: ttsSettingsRef.current.pitch,
@@ -735,6 +751,27 @@ export default function BookReadPage() {
     const cached = ttsChunkBlobCacheRef.current[chunk.index];
     if (cached?.text === chunk.text) return cached.url;
     if (!manifest) throw new Error('书籍信息未准备好');
+    const { cacheKey, textHash } = await buildBookTtsCacheKey({
+      sourceId: manifest.book.sourceId,
+      bookId: manifest.book.id,
+      chapterHref,
+      chunkIndex: chunk.index,
+      text: chunk.text,
+      voice: ttsSettingsRef.current.voice,
+      rate: ttsSettingsRef.current.rate,
+      pitch: ttsSettingsRef.current.pitch,
+      volume: ttsSettingsRef.current.volume,
+    });
+
+    const persisted = await getCachedBookTtsChunk(cacheKey).catch(() => null);
+    if (persisted?.audioBlob) {
+      const url = URL.createObjectURL(persisted.audioBlob);
+      ttsChunkBlobCacheRef.current[chunk.index] = { url, text: chunk.text };
+      ttsChunkAudioUrlRef.current[chunk.index] = url;
+      void touchCachedBookTtsChunk(cacheKey).catch(() => undefined);
+      return url;
+    }
+
     const response = await fetch('/api/books/tts/synthesize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -756,6 +793,26 @@ export default function BookReadPage() {
     if (cached?.url) URL.revokeObjectURL(cached.url);
     ttsChunkBlobCacheRef.current[chunk.index] = { url, text: chunk.text };
     ttsChunkAudioUrlRef.current[chunk.index] = url;
+    void putCachedBookTtsChunk({
+      cacheKey,
+      sourceId: manifest.book.sourceId,
+      bookId: manifest.book.id,
+      chapterHref,
+      chunkIndex: chunk.index,
+      textHash,
+      voice: ttsSettingsRef.current.voice,
+      rate: ttsSettingsRef.current.rate,
+      pitch: ttsSettingsRef.current.pitch,
+      volume: ttsSettingsRef.current.volume,
+      textPreview: chunk.text.slice(0, 80),
+      mimeType: json.mimeType || 'audio/mpeg',
+      audioBlob: blob,
+      size: blob.size,
+      createdAt: Date.now(),
+      lastAccessAt: Date.now(),
+    })
+      .then(() => enforceBookTtsCacheLimit())
+      .catch(() => undefined);
     return url;
   }, [manifest]);
 
@@ -778,7 +835,7 @@ export default function BookReadPage() {
     const chunks = ttsChunksRef.current;
     const chunk = chunks[index];
     const chapterHref = ttsCurrentChapterHrefRef.current;
-    if (!chunk || !chapterHref) return;
+    if (!chunk || !chapterHref || !manifest) return;
     try {
       setTtsError('');
       setTtsLoadingChunkIndex(index);
@@ -788,6 +845,11 @@ export default function BookReadPage() {
         audioRef.current = new Audio();
       }
       audioRef.current.src = url;
+      ttsResumeTimeRef.current = 0;
+      const saved = getBookTtsProgress(manifest.book.sourceId, manifest.book.id);
+      if (saved?.chapterHref === chapterHref && saved.chunkIndex === index) {
+        ttsResumeTimeRef.current = saved.currentTimeSec || 0;
+      }
       await audioRef.current.play();
       ttsCurrentChunkIndexRef.current = index;
       setTtsCurrentChunkIndex(index);
@@ -799,7 +861,7 @@ export default function BookReadPage() {
       setTtsLoadingChunkIndex(null);
       setTtsError((error as Error).message || '朗读失败');
     }
-  }, [fetchTtsChunkAudioUrl, persistTtsProgress]);
+  }, [fetchTtsChunkAudioUrl, manifest, persistTtsProgress]);
 
   const bootstrapTtsForCurrentChapter = useCallback(async (resume = true) => {
     if (!manifest || manifest.format !== 'epub') return;
@@ -1076,6 +1138,10 @@ export default function BookReadPage() {
     };
     const handleLoadedMetadata = () => {
       const nextDuration = audio.duration || 0;
+      if (ttsResumeTimeRef.current > 0 && nextDuration > 0) {
+        audio.currentTime = Math.min(ttsResumeTimeRef.current, Math.max(0, nextDuration - 0.25));
+        ttsResumeTimeRef.current = 0;
+      }
       setTtsDuration(nextDuration);
       if (!ttsSeekingRef.current) {
         setTtsSeekValue(audio.currentTime || 0);
@@ -1433,7 +1499,7 @@ export default function BookReadPage() {
                 </div>
                 <div className='mt-2 flex items-center justify-between text-[11px] text-gray-400'>
                   <span>{selectedVoice?.displayName || '默认音色'}</span>
-                  <span>{Math.floor(displayedTtsTime)}s / {Math.floor(ttsDuration || 0)}s</span>
+                  <span>{formatDurationTime(displayedTtsTime)} / {formatDurationTime(ttsDuration || 0)}</span>
                 </div>
               </div>
             </div>

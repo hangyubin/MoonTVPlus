@@ -149,6 +149,7 @@ export interface BookTtsProgress {
   chapterTitle?: string;
   chunkIndex: number;
   charOffset: number;
+  currentTimeSec?: number;
   voice: string;
   rate: string;
   pitch: string;
