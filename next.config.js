@@ -17,45 +17,8 @@ const optimizedPackageImports = [
   'react-icons',
 ];
 
-const serverExternalPackages = [
-  '@upstash/redis',
-  // @upstash/redis depends on uncrypto, whose package exports include a
-  // workerd condition. OpenNext needs it traced as a full external package,
-  // otherwise .open-next may contain package.json without dist/crypto.web.mjs.
-  'uncrypto',
-  '@vercel/postgres',
-  'better-sqlite3',
-  'cheerio',
-  'nodemailer',
-  'pg',
-  'redis',
-  'socket.io',
-  'xml2js',
-  'xpath',
-];
-
-// 仅在开发环境或 Cloudflare 环境下排除 6b85c446 和 706b2fe 引入的 external 包；
-// 其它未来加入的 server external 包不受影响。
-const buildExcludedServerExternalPackages = [
-  '@upstash/redis',
-  'uncrypto',
-  '@vercel/postgres',
-  'better-sqlite3',
-  'cheerio',
-  'nodemailer',
-  'pg',
-  'redis',
-  'socket.io',
-  'xml2js',
-  'xpath',
-];
-
 const createNextConfig = (phase) => {
   const isDevelopment = phase === PHASE_DEVELOPMENT_SERVER || process.env.NODE_ENV === 'development';
-  const effectiveServerExternalPackages =
-    isDevelopment || isCloudflare
-      ? serverExternalPackages.filter((pkg) => !buildExcludedServerExternalPackages.includes(pkg))
-      : serverExternalPackages;
 
   const nextConfig = {
   // Cloudflare Pages 不支持 standalone，使用默认输出
@@ -72,9 +35,6 @@ const createNextConfig = (phase) => {
   experimental: {
     instrumentationHook: process.env.NODE_ENV === 'production' && !isCloudflare,
     optimizePackageImports: optimizedPackageImports,
-    ...(effectiveServerExternalPackages.length
-      ? { serverComponentsExternalPackages: effectiveServerExternalPackages }
-      : {}),
     webpackBuildWorker: !isCloudflare,
   },
 
