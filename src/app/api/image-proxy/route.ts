@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import nodeFetch from 'node-fetch';
 import { NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
@@ -48,6 +47,28 @@ function isBangumiImageUrl(url: string): boolean {
   }
 }
 
+// 创建一个带超时的 fetch 函数
+async function fetchWithTimeout(
+  url: string,
+  options: any,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
+  }
+}
+
 async function fetchImage(
   imageUrl: string,
   options?: { source?: string }
@@ -66,24 +87,62 @@ async function fetchImage(
     ? applyBangumiImageBaseUrl(imageUrl, config?.SiteConfig.BangumiImageBaseUrl)
     : imageUrl;
 
+  // Cloudflare 环境或非 Bangumi 图片，直接使用原生 fetch
   if (!isBangumiImage || isCloudflareEnvironment()) {
-    return fetch(targetUrl, { headers, signal: AbortSignal.timeout(15000) });
+    return fetchWithTimeout(targetUrl, { headers }, 15000);
   }
 
+  // 使用代理的情况
   const proxy = config?.SiteConfig.BangumiProxy?.trim();
-  const fetchOptions: any = {
-    headers,
-    signal: AbortSignal.timeout(proxy ? 30000 : 15000),
-  };
-
-  if (proxy) {
-    fetchOptions.agent = new HttpsProxyAgent(proxy, {
-      timeout: 30000,
-      keepAlive: false,
-    });
+  
+  if (!proxy) {
+    return fetchWithTimeout(targetUrl, { headers }, 15000);
   }
 
-  return nodeFetch(targetUrl, fetchOptions) as unknown as Promise<Response>;
+  // 使用代理时，需要用 node-fetch 或原生 fetch 配合代理
+  // 注意：Node.js 18+ 原生 fetch 不支持 agent 参数，所以需要特殊处理
+  const https = require('https');
+  const { URL } = require('url');
+  
+  const urlObj = new URL(targetUrl);
+  const agent = new HttpsProxyAgent(proxy, {
+    timeout: 30000,
+    keepAlive: false,
+  });
+  
+  return new Promise((resolve, reject) => {
+    const requestOptions = {
+      hostname: urlObj.hostname,
+      port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers,
+      agent,
+    };
+    
+    const protocol = urlObj.protocol === 'https:' ? https : require('http');
+    const req = protocol.request(requestOptions, (res: any) => {
+      // 将 IncomingMessage 转换为 Response 对象
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks);
+        const response = new Response(body, {
+          status: res.statusCode,
+          statusText: res.statusMessage,
+          headers: new Headers(res.headers),
+        });
+        resolve(response);
+      });
+    });
+    
+    req.on('error', reject);
+    req.setTimeout(30000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    req.end();
+  });
 }
 
 // OrionTV 兼容接口
@@ -100,42 +159,53 @@ export async function GET(request: Request) {
     const imageResponse = await fetchImage(imageUrl, { source });
 
     if (!imageResponse.ok) {
+      console.error(`图片获取失败: ${imageUrl}, 状态码: ${imageResponse.status}`);
+      // 返回一个占位图而不是错误
       return NextResponse.json(
-        { error: imageResponse.statusText },
+        { error: `Failed to fetch image: ${imageResponse.statusText}` },
         { status: imageResponse.status }
       );
     }
 
     const contentType = imageResponse.headers.get('content-type');
-
-    if (!imageResponse.body) {
+    
+    if (!contentType || !contentType.startsWith('image/')) {
+      console.error(`无效的内容类型: ${contentType}, URL: ${imageUrl}`);
       return NextResponse.json(
-        { error: 'Image response has no body' },
+        { error: 'Invalid content type' },
         { status: 500 }
       );
     }
 
+    // 获取图片数据
+    const imageBuffer = await imageResponse.arrayBuffer();
+    
     // 创建响应头
-    const headers = new Headers();
-    if (contentType) {
-      headers.set('Content-Type', contentType);
-    }
+    const headers = new Headers({
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=86400, s-maxage=86400', // 缓存1天
+      'CDN-Cache-Control': 'public, s-maxage=86400',
+    });
 
-    // 设置缓存头（可选）
-    headers.set('Cache-Control', 'public, max-age=15720000, s-maxage=15720000'); // 缓存半年
-    headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
-    headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
-    headers.set('Netlify-Vary', 'query');
-
-    // 直接返回图片流
-    return new Response(imageResponse.body, {
+    // 返回图片数据
+    return new Response(imageBuffer, {
       status: 200,
       headers,
     });
-  } catch (error) {
-    console.error('图片代理请求失败:', error);
+  } catch (error: any) {
+    console.error('图片代理请求失败:', {
+      url: imageUrl,
+      source,
+      error: error.message,
+      stack: error.stack,
+    });
+    
+    // 返回一个透明的占位图或错误提示
     return NextResponse.json(
-      { error: 'Error fetching image' },
+      { 
+        error: 'Error fetching image',
+        details: error.message 
+      },
       { status: 500 }
     );
   }
